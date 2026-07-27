@@ -46,11 +46,14 @@ export interface KycState {
 
 /** Fetch the current user's KYC + payout state from their profile row. */
 export async function fetchKycState(): Promise<KycState | null> {
+  const uid = await currentUserId();
+  if (!uid) return null;
   const { data, error } = await supabase
     .from("profiles")
     .select(
       "kyc_status, kyc_last_reason, kyc_submitted_at, kyc_reviewed_at, payout_method, payout_paypal_email, payout_bank_account_last4, payout_bank_country",
     )
+    .eq("id", uid)
     .maybeSingle();
 
   if (error) {
