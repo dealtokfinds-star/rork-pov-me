@@ -1,14 +1,21 @@
 import { requireAuth, createAdminClient, AuthError, corsHeaders, json } from "../_shared/auth.ts";
 import { createPayout, retrieveBalance, StripeError } from "../_shared/stripe.ts";
+import { useLemonSqueezy } from "../_shared/lemonsqueezy.ts";
 
 /**
  * POST /request-payout
- * Requests a payout from the creator's Stripe Connect balance to their
- * linked bank account. The payout amount is either specified or the full
- * available balance.
+ * Requests a payout of the creator's available balance.
+ *
+ * For Lemon Squeezy (MoR) mode: creates a `payouts` row marked `requested`
+ * for the admin to fulfill (weekly bank transfer / PayPal). No external API
+ * call — the platform executes the transfer out-of-band and marks it paid
+ * via the admin `fulfill_payout` action.
+ *
+ * For Stripe (legacy) mode: calls the Stripe Payouts API to send funds to
+ * the creator's linked bank account.
  *
  * Body: { amount?: number }  // if omitted, pays out full available balance
- * Returns: { payout_id: string, amount: number, status: string, arrival_date: string }
+ * Returns: { payout_id: string, amount: number, status: string, arrival_date: string | null }
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -22,23 +29,74 @@ Deno.serve(async (req) => {
     const user = await requireAuth(req);
     const body = await req.json().catch(() => ({})) as { amount?: number };
     const admin = createAdminClient();
+    const useLS = useLemonSqueezy();
+    const now = new Date().toISOString();
 
     const { data: profile } = await admin.from("profiles")
-      .select("id, stripe_account_id, stripe_payouts_enabled, pending_payout, payout_balance")
+      .select("id, stripe_account_id, stripe_payouts_enabled, pending_payout, payout_balance, payout_method, payout_paypal_email, payout_bank_account_last4, payout_bank_account_holder, payout_bank_routing, payout_bank_country")
       .eq("id", user.userId)
       .maybeSingle();
 
     if (!profile) {
       return json({ error: "Profile not found" }, 404);
     }
-    if (!profile.stripe_account_id) {
-      return json({ error: "Connect account not set up" }, 400);
+
+    // ---- Lemon Squeezy path ----
+    if (useLS || !profile.stripe_account_id) {
+      if (!profile.payout_method) {
+        return json({ error: "Add your payout details first (PayPal or bank)" }, 400);
+      }
+
+      const available = Number(profile.payout_balance ?? 0);
+      let amount: number;
+      if (body.amount && body.amount > 0) {
+        amount = Math.round(body.amount * 100) / 100;
+        if (amount > available) {
+          return json({ error: `Insufficient balance. Available: $${available.toFixed(2)}` }, 400);
+        }
+      } else {
+        amount = available;
+      }
+
+      if (amount < 1) {
+        return json({ error: "Minimum payout is $1.00" }, 400);
+      }
+
+      // Insert a payout row marked 'requested' for admin fulfillment
+      const { data: payoutRow, error } = await admin.from("payouts").insert({
+        creator_id: user.userId,
+        amount,
+        status: "requested",
+        method: profile.payout_method === "paypal" ? "paypal" : "bank_transfer",
+        currency: "usd",
+        requested_at: now,
+      }).select("id").single();
+
+      if (error || !payoutRow) {
+        console.error("[request-payout] insert error:", error?.message);
+        return json({ error: "Failed to create payout request" }, 500);
+      }
+
+      // Move the requested amount from payout_balance to pending_payout
+      await admin.from("profiles").update({
+        pending_payout: Number(profile.pending_payout ?? 0) + amount,
+        payout_balance: Math.max(0, available - amount),
+        updated_at: now,
+      }).eq("id", user.userId);
+
+      return json({
+        payout_id: payoutRow.id,
+        amount,
+        status: "requested",
+        arrival_date: null,
+      });
     }
+
+    // ---- Stripe path (legacy) ----
     if (!profile.stripe_payouts_enabled) {
       return json({ error: "Payouts not enabled — complete onboarding first" }, 400);
     }
 
-    // Get available balance from Stripe
     const balance = await retrieveBalance(profile.stripe_account_id);
     const availableCents = balance.available?.[0]?.amount ?? 0;
 
@@ -58,7 +116,6 @@ Deno.serve(async (req) => {
       return json({ error: "Minimum payout is $1.00" }, 400);
     }
 
-    // Create the payout via Stripe
     const payout = await createPayout({
       amount: amountCents,
       currency: "usd",
@@ -66,7 +123,6 @@ Deno.serve(async (req) => {
       metadata: { user_id: user.userId },
     }, profile.stripe_account_id);
 
-    // Record in payouts table
     await admin.from("payouts").insert({
       creator_id: user.userId,
       amount: amountCents / 100,
@@ -74,13 +130,12 @@ Deno.serve(async (req) => {
       stripe_payout_id: payout.id,
       method: "stripe_connect",
       currency: "usd",
-      requested_at: new Date().toISOString(),
+      requested_at: now,
     });
 
-    // Update profile pending payout
     await admin.from("profiles").update({
       pending_payout: Number(profile.pending_payout ?? 0) + (amountCents / 100),
-      updated_at: new Date().toISOString(),
+      updated_at: now,
     }).eq("id", user.userId);
 
     return json({

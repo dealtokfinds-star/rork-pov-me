@@ -1,7 +1,7 @@
 import { Image } from "expo-image";
 import { AlertTriangle, BadgeCheck, Check, Eye, Flag, Pencil, Plus, Shield, Trash2, UserX, X } from "lucide-react-native";
-import React, { useState } from "react";
-import { Modal, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, Modal, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar, Chip, PressableScale, SectionHeader, StatTile, Tag, haptic } from "@/components/ui";
@@ -9,17 +9,22 @@ import Colors, { Radius, microLabel } from "@/constants/colors";
 import { formatMoney } from "@/constants/mock-data";
 import { useAdminCategories, useCategories, type CategoryInput } from "@/hooks/useDiscovery";
 import { useProfile } from "@/hooks/useProfile";
-import { useAdmin, type ReportRow, type AdminCreatorRow } from "@/hooks/useAdmin";
+import { useAdmin, type ReportRow, type AdminCreatorRow, type PendingApplicationRow } from "@/hooks/useAdmin";
+import { getKycDocumentSignedUrl } from "@/lib/creator-onboarding";
 
 type Tab = "queue" | "creators" | "payments" | "categories";
 
 export default function AdminScreen() {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>("queue");
-  const { reports, creators, revenue, isLoading: adminLoading, adminAction } = useAdmin();
+  const { reports, creators, revenue, applications, isLoading: adminLoading, adminAction, approveCreator, rejectCreator } = useAdmin();
   const { account } = useProfile();
   const [resolved, setResolved] = useState<string[]>([]);
   const [approved, setApproved] = useState<string[]>([]);
+  const [reviewing, setReviewing] = useState<PendingApplicationRow | null>(null);
+  const [rejecting, setRejecting] = useState<PendingApplicationRow | null>(null);
+  const [rejectReason, setRejectReason] = useState<string>("");
+  const [reviewBusy, setReviewBusy] = useState<boolean>(false);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={{ paddingBottom: insets.bottom + 40 }} showsVerticalScrollIndicator={false}>
@@ -36,7 +41,7 @@ export default function AdminScreen() {
 
       <View style={styles.statRow}>
         <StatTile label="Open reports" value={`${reports.filter((r) => r.status === "open").length}`} sub="avg 4h to close" accent={Colors.magenta} />
-        <StatTile label="Pending creators" value={`${creators.filter((c) => c.kyc_status === "pending" || c.kyc_status === "unverified").length}`} sub="KYC submitted" accent={Colors.cyan} />
+        <StatTile label="Pending creators" value={`${applications.length}`} sub="KYC submitted" accent={Colors.cyan} />
       </View>
       <View style={styles.statRow}>
         <StatTile label="Auto-flags" value="128" sub="last 7 days" accent={Colors.gold} />
@@ -138,65 +143,24 @@ export default function AdminScreen() {
       ) : null}
 
       {tab === "creators" ? (
-        <View style={{ paddingHorizontal: 18, gap: 10, marginTop: 18 }}>
-          {adminLoading ? (
-            <Text style={styles.cardMeta}>Loading creators…</Text>
-          ) : creators.length === 0 ? (
-            <Text style={styles.cardMeta}>No creators yet.</Text>
-          ) : (
-            creators.map((c: AdminCreatorRow) => {
-              const ok = approved.includes(c.id) || c.kyc_status === "verified";
-              return (
-                <View key={c.id} style={styles.card}>
-                  <View style={styles.cardHead}>
-                    <Avatar uri={c.avatar_url ?? ""} size={44} />
-                    <View style={{ flex: 1, marginLeft: 11 }}>
-                      <Text style={styles.cardTitle}>{c.name ?? c.handle ?? "Unknown"}</Text>
-                      <Text style={styles.cardMeta}>
-                        KYC: {c.kyc_status ?? "none"} · Payouts: {c.stripe_payouts_enabled ? "enabled" : "held"}
-                      </Text>
-                    </View>
-                    {ok ? <BadgeCheck size={19} color={Colors.success} /> : null}
-                  </View>
-                  <View style={styles.checkList}>
-                    <CheckItem label={`KYC: ${c.kyc_status ?? "not started"}`} />
-                    <CheckItem label={`Payouts: ${c.stripe_payouts_enabled ? "enabled" : "not enabled"}`} />
-                    <CheckItem label={`Lifetime earnings: ${formatMoney(Number(c.lifetime_earnings ?? 0))}`} />
-                    <CheckItem label={`Payout balance: ${formatMoney(Number(c.payout_balance ?? 0))}`} />
-                  </View>
-                  {!ok ? (
-                    <View style={styles.actionRow}>
-                      <ActionBtn
-                        icon={<Check size={14} color={Colors.lime} />}
-                        label="Reinstate"
-                        tint={Colors.lime}
-                        onPress={async () => {
-                          await adminAction("reinstate_user", { user_id: c.id });
-                          setApproved((p) => [...p, c.id]);
-                          haptic("success");
-                        }}
-                      />
-                      <ActionBtn
-                        icon={<X size={14} color={Colors.danger} />}
-                        label="Suspend"
-                        tint={Colors.danger}
-                        onPress={async () => {
-                          await adminAction("suspend_user", { user_id: c.id, reason: "Admin action" });
-                          haptic("heavy");
-                        }}
-                      />
-                    </View>
-                  ) : (
-                    <View style={styles.doneRow}>
-                      <Check size={13} color={Colors.success} />
-                      <Text style={styles.doneText}>Verified & active</Text>
-                    </View>
-                  )}
-                </View>
-              );
-            })
-          )}
-        </View>
+        <ApplicationsTab
+          applications={applications}
+          creators={creators}
+          approved={approved}
+          adminLoading={adminLoading}
+          adminAction={adminAction}
+          approveCreator={approveCreator}
+          rejectCreator={rejectCreator}
+          reviewing={reviewing}
+          setReviewing={setReviewing}
+          rejecting={rejecting}
+          setRejecting={setRejecting}
+          rejectReason={rejectReason}
+          setRejectReason={setRejectReason}
+          reviewBusy={reviewBusy}
+          setReviewBusy={setReviewBusy}
+          onApproved={(id) => setApproved((p) => [...p, id])}
+        />
       ) : null}
 
       {tab === "payments" ? (
@@ -231,6 +195,350 @@ export default function AdminScreen() {
 
       {tab === "categories" ? <CategoryManager /> : null}
     </ScrollView>
+  );
+}
+
+// ─── Applications tab (KYC review) ─────────────────────────────────────
+
+interface ApplicationsTabProps {
+  applications: PendingApplicationRow[];
+  creators: AdminCreatorRow[];
+  approved: string[];
+  adminLoading: boolean;
+  adminAction: (action: string, payload: Record<string, unknown>) => Promise<{ ok: boolean; error?: string }>;
+  approveCreator: (userId: string) => Promise<{ ok: boolean; error?: string }>;
+  rejectCreator: (userId: string, reason: string) => Promise<{ ok: boolean; error?: string }>;
+  reviewing: PendingApplicationRow | null;
+  setReviewing: (r: PendingApplicationRow | null) => void;
+  rejecting: PendingApplicationRow | null;
+  setRejecting: (r: PendingApplicationRow | null) => void;
+  rejectReason: string;
+  setRejectReason: (s: string) => void;
+  reviewBusy: boolean;
+  setReviewBusy: (b: boolean) => void;
+  onApproved: (id: string) => void;
+}
+
+function ApplicationsTab({
+  applications,
+  creators,
+  approved,
+  adminLoading,
+  adminAction,
+  approveCreator,
+  rejectCreator,
+  reviewing,
+  setReviewing,
+  rejecting,
+  setRejecting,
+  rejectReason,
+  setRejectReason,
+  reviewBusy,
+  setReviewBusy,
+  onApproved,
+}: ApplicationsTabProps) {
+  return (
+    <View style={{ paddingHorizontal: 18, gap: 10, marginTop: 18 }}>
+      {adminLoading ? (
+        <Text style={styles.cardMeta}>Loading applications…</Text>
+      ) : applications.length === 0 ? (
+        <Text style={styles.cardMeta}>No pending applications. 🎉</Text>
+      ) : (
+        applications.map((app) => (
+          <View key={app.id} style={styles.card}>
+            <View style={styles.cardHead}>
+              <Avatar uri={app.avatar_url ?? ""} size={44} />
+              <View style={{ flex: 1, marginLeft: 11 }}>
+                <Text style={styles.cardTitle}>{app.name ?? app.handle ?? "Unknown"}</Text>
+                <Text style={styles.cardMeta}>
+                  {app.email ?? ""} · {app.identity ?? "No identity tag"}
+                </Text>
+              </View>
+              <Tag label="PENDING" color={Colors.ink} bg={Colors.gold} />
+            </View>
+            <View style={styles.checkList}>
+              <CheckItem label={`Identity: ${app.identity ?? "—"}`} />
+              <CheckItem label={`Price: ${formatMoney(Number(app.sub_price ?? 0))}/mo`} />
+              <CheckItem label={`Payout: ${app.payout_method === "paypal" ? `PayPal · ${app.payout_paypal_email ?? ""}` : app.payout_method === "bank" ? `Bank ••••${app.payout_bank_account_last4 ?? ""}` : "Not set"}`} />
+            </View>
+            <View style={styles.actionRow}>
+              <ActionBtn
+                icon={<Eye size={14} color={Colors.text} />}
+                label="Review docs"
+                onPress={() => setReviewing(app)}
+              />
+              <ActionBtn
+                icon={<Check size={14} color={Colors.lime} />}
+                label="Approve"
+                tint={Colors.lime}
+                onPress={async () => {
+                  setReviewBusy(true);
+                  const res = await approveCreator(app.id);
+                  setReviewBusy(false);
+                  if (res.ok) {
+                    onApproved(app.id);
+                    haptic("success");
+                  }
+                }}
+              />
+              <ActionBtn
+                icon={<X size={14} color={Colors.danger} />}
+                label="Reject"
+                tint={Colors.danger}
+                onPress={() => {
+                  setRejecting(app);
+                  setRejectReason("");
+                }}
+              />
+            </View>
+          </View>
+        ))
+      )}
+
+      {/* Verified creators list below the pending applications */}
+      <Text style={[styles.cardTitle, { marginTop: 8, marginBottom: 4 }]}>All creators</Text>
+      {creators.map((c: AdminCreatorRow) => {
+        const ok = approved.includes(c.id) || c.kyc_status === "verified";
+        return (
+          <View key={c.id} style={styles.card}>
+            <View style={styles.cardHead}>
+              <Avatar uri={c.avatar_url ?? ""} size={44} />
+              <View style={{ flex: 1, marginLeft: 11 }}>
+                <Text style={styles.cardTitle}>{c.name ?? c.handle ?? "Unknown"}</Text>
+                <Text style={styles.cardMeta}>
+                  KYC: {c.kyc_status ?? "none"} · Payouts: {c.stripe_payouts_enabled ? "enabled" : "held"}
+                </Text>
+              </View>
+              {ok ? <BadgeCheck size={19} color={Colors.success} /> : null}
+            </View>
+            <View style={styles.checkList}>
+              <CheckItem label={`KYC: ${c.kyc_status ?? "not started"}`} />
+              <CheckItem label={`Lifetime earnings: ${formatMoney(Number(c.lifetime_earnings ?? 0))}`} />
+              <CheckItem label={`Payout balance: ${formatMoney(Number(c.payout_balance ?? 0))}`} />
+            </View>
+            {!ok ? (
+              <View style={styles.actionRow}>
+                <ActionBtn
+                  icon={<Check size={14} color={Colors.lime} />}
+                  label="Reinstate"
+                  tint={Colors.lime}
+                  onPress={async () => {
+                    await adminAction("reinstate_user", { user_id: c.id });
+                    onApproved(c.id);
+                    haptic("success");
+                  }}
+                />
+                <ActionBtn
+                  icon={<X size={14} color={Colors.danger} />}
+                  label="Suspend"
+                  tint={Colors.danger}
+                  onPress={async () => {
+                    await adminAction("suspend_user", { user_id: c.id, reason: "Admin action" });
+                    haptic("heavy");
+                  }}
+                />
+              </View>
+            ) : (
+              <View style={styles.doneRow}>
+                <Check size={13} color={Colors.success} />
+                <Text style={styles.doneText}>Verified & active</Text>
+              </View>
+            )}
+          </View>
+        );
+      })}
+
+      <KycReviewModal
+        application={reviewing}
+        onClose={() => setReviewing(null)}
+        onApprove={async () => {
+          if (!reviewing) return;
+          setReviewBusy(true);
+          const res = await approveCreator(reviewing.id);
+          setReviewBusy(false);
+          if (res.ok) {
+            onApproved(reviewing.id);
+            setReviewing(null);
+            haptic("success");
+          }
+        }}
+        busy={reviewBusy}
+      />
+      <RejectModal
+        application={rejecting}
+        reason={rejectReason}
+        setReason={setRejectReason}
+        onClose={() => setRejecting(null)}
+        onReject={async () => {
+          if (!rejecting) return;
+          setReviewBusy(true);
+          const res = await rejectCreator(rejecting.id, rejectReason || "Documents unclear");
+          setReviewBusy(false);
+          if (res.ok) {
+            setRejecting(null);
+            setRejectReason("");
+            haptic("heavy");
+          }
+        }}
+        busy={reviewBusy}
+      />
+    </View>
+  );
+}
+
+function KycDocImage({ path, label }: { path: string; label: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    getKycDocumentSignedUrl(path)
+      .then((u) => {
+        if (mounted) {
+          setUrl(u);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [path]);
+
+  return (
+    <View style={styles.kycImgWrap}>
+      <Text style={styles.kycImgLabel}>{label}</Text>
+      <View style={styles.kycImgBox}>
+        {loading ? (
+          <ActivityIndicator size="small" color={Colors.lime} />
+        ) : url ? (
+          <Image source={{ uri: url }} style={styles.kycImg} contentFit="contain" />
+        ) : (
+          <Text style={styles.kycImgErr}>Failed to load</Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function KycReviewModal({
+  application,
+  onClose,
+  onApprove,
+  busy,
+}: {
+  application: PendingApplicationRow | null;
+  onClose: () => void;
+  onApprove: () => void;
+  busy: boolean;
+}) {
+  if (!application) return null;
+  const docs = application.kyc_documents;
+  return (
+    <Modal visible={application !== null} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalWrap}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHead}>
+            <Text style={styles.modalTitle}>Review application</Text>
+            <PressableScale onPress={onClose} scaleTo={0.88}>
+              <View style={styles.modalClose}>
+                <X size={16} color={Colors.textMid} />
+              </View>
+            </PressableScale>
+          </View>
+          <ScrollView style={{ maxHeight: 520 }} showsVerticalScrollIndicator={false}>
+            <View style={styles.cardHead}>
+              <Avatar uri={application.avatar_url ?? ""} size={48} />
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={styles.cardTitle}>{application.name ?? application.handle ?? "Unknown"}</Text>
+                <Text style={styles.cardMeta}>@{application.handle ?? "—"} · {application.email ?? ""}</Text>
+                <Text style={styles.cardMeta}>{application.identity ?? "No identity tag"}</Text>
+              </View>
+            </View>
+            <View style={styles.kycImgRow}>
+              {docs?.front ? <KycDocImage path={docs.front} label="ID front" /> : null}
+              {docs?.back ? <KycDocImage path={docs.back} label="ID back" /> : null}
+              {docs?.selfie ? <KycDocImage path={docs.selfie} label="Selfie" /> : null}
+            </View>
+            <View style={styles.modalActions}>
+              <PressableScale onPress={onClose} scaleTo={0.96} style={{ flex: 1 }}>
+                <View style={styles.cancelBtn}>
+                  <Text style={styles.cancelText}>Cancel</Text>
+                </View>
+              </PressableScale>
+              <PressableScale onPress={onApprove} scaleTo={0.96} hapticStyle="success" disabled={busy} style={{ flex: 1 }}>
+                <View style={styles.saveBtn}>
+                  <Check size={14} color={Colors.ink} />
+                  <Text style={styles.saveText}>{busy ? "Approving…" : "Approve creator"}</Text>
+                </View>
+              </PressableScale>
+            </View>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function RejectModal({
+  application,
+  reason,
+  setReason,
+  onClose,
+  onReject,
+  busy,
+}: {
+  application: PendingApplicationRow | null;
+  reason: string;
+  setReason: (s: string) => void;
+  onClose: () => void;
+  onReject: () => void;
+  busy: boolean;
+}) {
+  if (!application) return null;
+  return (
+    <Modal visible={application !== null} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalWrap}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHead}>
+            <Text style={styles.modalTitle}>Reject application</Text>
+            <PressableScale onPress={onClose} scaleTo={0.88}>
+              <View style={styles.modalClose}>
+                <X size={16} color={Colors.textMid} />
+              </View>
+            </PressableScale>
+          </View>
+          <Text style={styles.cardMeta}>
+            Rejecting {application.name ?? application.handle ?? "this creator"}. They will be emailed and can resubmit.
+          </Text>
+          <TextInput
+            value={reason}
+            onChangeText={setReason}
+            placeholder="e.g. ID photo too blurry — retake in good light"
+            placeholderTextColor={Colors.textDim}
+            style={[styles.fieldInput, { height: 90, textAlignVertical: "top" }]}
+            multiline
+            autoFocus
+          />
+          <View style={styles.modalActions}>
+            <PressableScale onPress={onClose} scaleTo={0.96} style={{ flex: 1 }}>
+              <View style={styles.cancelBtn}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </View>
+            </PressableScale>
+            <PressableScale onPress={onReject} scaleTo={0.96} hapticStyle="heavy" disabled={busy} style={{ flex: 1 }}>
+              <View style={styles.deleteBtn}>
+                <X size={14} color="#fff" />
+                <Text style={styles.deleteText}>{busy ? "Rejecting…" : "Reject"}</Text>
+              </View>
+            </PressableScale>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -691,4 +999,21 @@ const styles = StyleSheet.create({
     gap: 7,
   },
   deleteText: { color: "#fff", fontSize: 14, fontWeight: "900" },
+
+  // KYC review
+  kycImgRow: { flexDirection: "row", gap: 8, marginTop: 14, flexWrap: "wrap" },
+  kycImgWrap: { flex: 1, minWidth: 100, gap: 6 },
+  kycImgLabel: { color: Colors.textDim, fontSize: 10.5, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.5 },
+  kycImgBox: {
+    height: 140,
+    borderRadius: 10,
+    backgroundColor: Colors.bg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  kycImg: { width: "100%", height: "100%" },
+  kycImgErr: { color: Colors.textDim, fontSize: 11, fontWeight: "600" },
 });
