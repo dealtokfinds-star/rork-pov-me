@@ -134,6 +134,9 @@ export async function submitKyc(input: {
  * Save payout details (PayPal or bank) via the `creator-payout-details`
  * edge function. Only the last 4 digits of the bank account number are
  * stored — the client extracts them before sending.
+ *
+ * The edge function expects snake_case keys (matching the DB columns),
+ * so we map the ergonomic camelCase input here before sending.
  */
 export async function savePayoutDetails(input: {
   method: "paypal" | "bank";
@@ -143,7 +146,16 @@ export async function savePayoutDetails(input: {
   bankRouting?: string;
   bankCountry?: string;
 }): Promise<{ ok: boolean; method: string }> {
-  return callEdge<{ ok: boolean; method: string }>("creator-payout-details", input);
+  const payload: Record<string, unknown> = { method: input.method };
+  if (input.method === "paypal") {
+    payload.paypal_email = input.paypalEmail;
+  } else {
+    payload.bank_account_holder = input.bankAccountHolder;
+    payload.bank_account_number = input.bankAccountNumber;
+    payload.bank_routing = input.bankRouting;
+    payload.bank_country = input.bankCountry;
+  }
+  return callEdge<{ ok: boolean; method: string }>("creator-payout-details", payload);
 }
 
 /**
