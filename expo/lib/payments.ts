@@ -168,8 +168,6 @@ export interface CreatorBalance {
     method: string;
   }>;
   payouts_enabled: boolean;
-  payout_method: string | null;
-  payout_handle: string | null;
   lifetime_earnings: number;
   pending_payout: number;
 }
@@ -191,15 +189,15 @@ export async function fetchCreatorBalance(): Promise<CreatorBalance> {
 }
 
 /**
- * Request a manual payout to the creator's saved handle
- * (PayPal/Venmo/CashApp/Zelle). The platform processes it and marks it paid.
+ * Request a payout to the creator's linked bank account.
  */
 export async function requestPayout(
   amount?: number,
 ): Promise<{
-  request_id: string;
+  payout_id: string;
   amount: number;
   status: string;
+  arrival_date: string | null;
 }> {
   const token = await getAuthToken();
   if (!token) throw new Error("Not authenticated");

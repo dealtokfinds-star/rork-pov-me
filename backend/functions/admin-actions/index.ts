@@ -15,10 +15,6 @@ import { createAdminClient, corsHeaders, json, requireAuth, AuthError } from "..
  *   - delete_stream:     { stream_id } → ends + deletes stream
  *   - feature_episode:   { episode_id, featured: boolean }
  *   - set_admin:         { user_id, is_admin: boolean }
- *   - approve_verification: { user_id } → sets kyc_status='verified'
- *   - reject_verification:  { user_id, reason } → sets kyc_status='failed'
- *   - mark_payout_paid:    { payout_id } → marks payout_request paid, deducts pending
- *   - mark_payout_failed:  { payout_id, note } → marks payout_request failed, refunds balance
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -136,90 +132,6 @@ Deno.serve(async (req) => {
           updated_at: now,
         }).eq("id", user_id);
         return json({ ok: true, action: "set_admin" });
-      }
-
-      case "approve_verification": {
-        const { user_id } = body as { user_id?: string };
-        if (!user_id) return json({ error: "user_id required" }, 400);
-        await admin.from("profiles").update({
-          kyc_status: "verified",
-          kyc_last_reason: null,
-          kyc_verified_at: now,
-          updated_at: now,
-        }).eq("id", user_id);
-        await admin.from("verification_docs").update({
-          status: "approved",
-          reviewer_id: user.userId,
-          reviewed_at: now,
-        }).eq("user_id", user_id).eq("status", "pending");
-        return json({ ok: true, action: "approve_verification" });
-      }
-
-      case "reject_verification": {
-        const { user_id, reason } = body as { user_id?: string; reason?: string };
-        if (!user_id) return json({ error: "user_id required" }, 400);
-        await admin.from("profiles").update({
-          kyc_status: "failed",
-          kyc_last_reason: reason ?? "Rejected by admin",
-          updated_at: now,
-        }).eq("id", user_id);
-        await admin.from("verification_docs").update({
-          status: "rejected",
-          reviewer_id: user.userId,
-          review_note: reason ?? null,
-          reviewed_at: now,
-        }).eq("user_id", user_id).eq("status", "pending");
-        return json({ ok: true, action: "reject_verification" });
-      }
-
-      case "mark_payout_paid": {
-        const { payout_id } = body as { payout_id?: string };
-        if (!payout_id) return json({ error: "payout_id required" }, 400);
-        const { data: reqRow } = await admin.from("payout_requests")
-          .select("creator_id, amount, status")
-          .eq("id", payout_id)
-          .maybeSingle();
-        if (!reqRow) return json({ error: "Payout not found" }, 404);
-        if (reqRow.status !== "requested") return json({ error: "Payout already processed" }, 400);
-        await admin.from("payout_requests").update({
-          status: "paid",
-          processed_by: user.userId,
-          processed_at: now,
-        }).eq("id", payout_id);
-        // Deduct from pending_payout
-        await admin.from("profiles").update({
-          pending_payout: Math.max(0, Number((await admin.from("profiles").select("pending_payout").eq("id", reqRow.creator_id).maybeSingle()).data?.pending_payout ?? 0) - Number(reqRow.amount)),
-          updated_at: now,
-        }).eq("id", reqRow.creator_id);
-        return json({ ok: true, action: "mark_payout_paid" });
-      }
-
-      case "mark_payout_failed": {
-        const { payout_id, note } = body as { payout_id?: string; note?: string };
-        if (!payout_id) return json({ error: "payout_id required" }, 400);
-        const { data: reqRow } = await admin.from("payout_requests")
-          .select("creator_id, amount, status")
-          .eq("id", payout_id)
-          .maybeSingle();
-        if (!reqRow) return json({ error: "Payout not found" }, 404);
-        if (reqRow.status !== "requested") return json({ error: "Payout already processed" }, 400);
-        await admin.from("payout_requests").update({
-          status: "failed",
-          admin_note: note ?? null,
-          processed_by: user.userId,
-          processed_at: now,
-        }).eq("id", payout_id);
-        // Refund: pending → balance
-        const { data: prof } = await admin.from("profiles")
-          .select("pending_payout, payout_balance")
-          .eq("id", reqRow.creator_id)
-          .maybeSingle();
-        await admin.from("profiles").update({
-          pending_payout: Math.max(0, Number(prof?.pending_payout ?? 0) - Number(reqRow.amount)),
-          payout_balance: Number(prof?.payout_balance ?? 0) + Number(reqRow.amount),
-          updated_at: now,
-        }).eq("id", reqRow.creator_id);
-        return json({ ok: true, action: "mark_payout_failed" });
       }
 
       default:

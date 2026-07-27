@@ -600,60 +600,6 @@ export type Database = {
           },
         ]
       }
-      payout_requests: {
-        Row: {
-          admin_note: string | null
-          amount: number
-          creator_id: string
-          id: string
-          payout_handle: string | null
-          payout_method: string | null
-          processed_at: string | null
-          processed_by: string | null
-          requested_at: string
-          status: string
-        }
-        Insert: {
-          admin_note?: string | null
-          amount: number
-          creator_id: string
-          id?: string
-          payout_handle?: string | null
-          payout_method?: string | null
-          processed_at?: string | null
-          processed_by?: string | null
-          requested_at?: string
-          status?: string
-        }
-        Update: {
-          admin_note?: string | null
-          amount?: number
-          creator_id?: string
-          id?: string
-          payout_handle?: string | null
-          payout_method?: string | null
-          processed_at?: string | null
-          processed_by?: string | null
-          requested_at?: string
-          status?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "payout_requests_creator_id_fkey"
-            columns: ["creator_id"]
-            isOneToOne: false
-            referencedRelation: "creator_stats"
-            referencedColumns: ["creator_id"]
-          },
-          {
-            foreignKeyName: "payout_requests_creator_id_fkey"
-            columns: ["creator_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       payouts: {
         Row: {
           amount: number
@@ -716,7 +662,6 @@ export type Database = {
       }
       profiles: {
         Row: {
-          agreed_to_terms_at: string | null
           avatar_url: string | null
           bio: string | null
           categories: string[] | null
@@ -737,15 +682,12 @@ export type Database = {
           kyc_status: string | null
           kyc_verified_at: string | null
           last_payout_at: string | null
-          legal_name: string | null
           lifetime_earnings: number | null
           location: string | null
           name: string | null
           onboarded: boolean | null
           payout_balance: number | null
           payout_connected: boolean | null
-          payout_handle: string | null
-          payout_method: string | null
           pending_payout: number | null
           stripe_account_id: string | null
           stripe_account_status: string | null
@@ -759,7 +701,6 @@ export type Database = {
           wallet_balance: number | null
         }
         Insert: {
-          agreed_to_terms_at?: string | null
           avatar_url?: string | null
           bio?: string | null
           categories?: string[] | null
@@ -780,15 +721,12 @@ export type Database = {
           kyc_status?: string | null
           kyc_verified_at?: string | null
           last_payout_at?: string | null
-          legal_name?: string | null
           lifetime_earnings?: number | null
           location?: string | null
           name?: string | null
           onboarded?: boolean | null
           payout_balance?: number | null
           payout_connected?: boolean | null
-          payout_handle?: string | null
-          payout_method?: string | null
           pending_payout?: number | null
           stripe_account_id?: string | null
           stripe_account_status?: string | null
@@ -802,7 +740,6 @@ export type Database = {
           wallet_balance?: number | null
         }
         Update: {
-          agreed_to_terms_at?: string | null
           avatar_url?: string | null
           bio?: string | null
           categories?: string[] | null
@@ -823,15 +760,12 @@ export type Database = {
           kyc_status?: string | null
           kyc_verified_at?: string | null
           last_payout_at?: string | null
-          legal_name?: string | null
           lifetime_earnings?: number | null
           location?: string | null
           name?: string | null
           onboarded?: boolean | null
           payout_balance?: number | null
           payout_connected?: boolean | null
-          payout_handle?: string | null
-          payout_method?: string | null
           pending_payout?: number | null
           stripe_account_id?: string | null
           stripe_account_status?: string | null
@@ -1359,57 +1293,6 @@ export type Database = {
           {
             foreignKeyName: "unlocks_fan_id_fkey"
             columns: ["fan_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      verification_docs: {
-        Row: {
-          doc_type: string
-          id: string
-          review_note: string | null
-          reviewed_at: string | null
-          reviewer_id: string | null
-          status: string
-          storage_path: string
-          uploaded_at: string
-          user_id: string
-        }
-        Insert: {
-          doc_type?: string
-          id?: string
-          review_note?: string | null
-          reviewed_at?: string | null
-          reviewer_id?: string | null
-          status?: string
-          storage_path: string
-          uploaded_at?: string
-          user_id: string
-        }
-        Update: {
-          doc_type?: string
-          id?: string
-          review_note?: string | null
-          reviewed_at?: string | null
-          reviewer_id?: string | null
-          status?: string
-          storage_path?: string
-          uploaded_at?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "verification_docs_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "creator_stats"
-            referencedColumns: ["creator_id"]
-          },
-          {
-            foreignKeyName: "verification_docs_user_id_fkey"
-            columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
