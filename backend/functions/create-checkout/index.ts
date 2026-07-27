@@ -166,12 +166,15 @@ Deno.serve(async (req) => {
         .eq("id", body.creator_id)
         .maybeSingle();
 
-      if (!creator?.stripe_account_id) {
-        return json({ error: "Creator has not set up payouts" }, 400);
-      }
-
       const amountCents = dollarsToCents(amount);
       const fee = feeCents(amountCents);
+
+      // If the creator hasn't finished Stripe Connect onboarding yet, we still
+      // accept the fan's payment on the platform account and hold the creator's
+      // 80% share in their local payout_balance until they connect Stripe.
+      // The webhook credits payout_balance when metadata.platform_held = "true".
+      const creatorConnected = !!creator?.stripe_account_id;
+      const tipMeta = { ...metadata, platform_held: creatorConnected ? "false" : "true" };
 
       session = await createCheckoutSession({
         mode: "payment",
@@ -181,19 +184,21 @@ Deno.serve(async (req) => {
             currency: CURRENCY,
             unit_amount: amountCents,
             product_data: {
-              name: `Tip to @${creator.handle ?? "creator"}`,
+              name: `Tip to @${creator?.handle ?? "creator"}`,
               description: body.message ?? "Support this creator",
               metadata: { creator_id: body.creator_id },
             },
           },
           quantity: 1,
         }],
-        metadata,
-        payment_intent_data: {
-          application_fee_amount: fee,
-          transfer_data: { destination: creator.stripe_account_id },
-          metadata,
-        },
+        metadata: tipMeta,
+        payment_intent_data: creatorConnected
+          ? {
+              application_fee_amount: fee,
+              transfer_data: { destination: creator!.stripe_account_id! },
+              metadata: tipMeta,
+            }
+          : { metadata: tipMeta },
         success_url: body.return_url,
         cancel_url: body.cancel_url,
       });
@@ -216,10 +221,6 @@ Deno.serve(async (req) => {
         .eq("id", body.creator_id)
         .maybeSingle();
 
-      if (!creator?.stripe_account_id) {
-        return json({ error: "Creator has not set up payouts" }, 400);
-      }
-
       const amountCents = dollarsToCents(amount);
       const fee = feeCents(amountCents);
 
@@ -235,6 +236,12 @@ Deno.serve(async (req) => {
         if (stream?.title) productName = `Live unlock: ${stream.title}`;
       }
 
+      // Same platform-held fallback as tips: if the creator hasn't connected
+      // Stripe yet, charge on the platform account and credit the creator's
+      // local payout_balance via the webhook (metadata.platform_held = "true").
+      const creatorConnected = !!creator?.stripe_account_id;
+      const ppvMeta = { ...metadata, platform_held: creatorConnected ? "false" : "true" };
+
       session = await createCheckoutSession({
         mode: "payment",
         customer: customerId!,
@@ -249,12 +256,14 @@ Deno.serve(async (req) => {
           },
           quantity: 1,
         }],
-        metadata,
-        payment_intent_data: {
-          application_fee_amount: fee,
-          transfer_data: { destination: creator.stripe_account_id },
-          metadata,
-        },
+        metadata: ppvMeta,
+        payment_intent_data: creatorConnected
+          ? {
+              application_fee_amount: fee,
+              transfer_data: { destination: creator!.stripe_account_id! },
+              metadata: ppvMeta,
+            }
+          : { metadata: ppvMeta },
         success_url: body.return_url,
         cancel_url: body.cancel_url,
       });
@@ -272,10 +281,6 @@ Deno.serve(async (req) => {
         .select("stripe_account_id, name, handle, sub_price")
         .eq("id", body.creator_id)
         .maybeSingle();
-
-      if (!creator?.stripe_account_id) {
-        return json({ error: "Creator has not set up payouts" }, 400);
-      }
 
       const price = Number(creator.sub_price ?? 9.99);
       const amountCents = dollarsToCents(price);
@@ -314,15 +319,23 @@ Deno.serve(async (req) => {
         priceId = priceObj.id;
       }
 
+      // Subscriptions: if the creator hasn't connected Stripe, still let the
+      // fan subscribe on the platform account. The webhook credits the creator's
+      // local payout_balance each renewal (metadata.platform_held = "true").
+      const creatorConnected = !!creator?.stripe_account_id;
+      const subMeta = { ...metadata, platform_held: creatorConnected ? "false" : "true" };
+
       session = await createCheckoutSession({
         mode: "subscription",
         customer: customerId!,
         line_items: [{ price: priceId, quantity: 1 }],
-        metadata,
-        subscription_data: {
-          application_fee_percent: PLATFORM_FEE_PERCENT,
-          metadata,
-        },
+        metadata: subMeta,
+        subscription_data: creatorConnected
+          ? {
+              application_fee_percent: PLATFORM_FEE_PERCENT,
+              metadata: subMeta,
+            }
+          : { metadata: subMeta },
         success_url: body.return_url,
         cancel_url: body.cancel_url,
       });
