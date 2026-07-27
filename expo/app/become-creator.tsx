@@ -8,7 +8,6 @@ import {
   Camera,
   Check,
   ChevronRight,
-  Coins,
   CreditCard as CardIcon,
   IdCard,
   Image as ImageIcon,
@@ -38,17 +37,15 @@ import Colors, { Radius, microLabel } from "@/constants/colors";
 import { CATEGORIES, formatMoney } from "@/constants/mock-data";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  PAYOUT_DESTINATIONS,
-  USDC_NETWORKS,
+  PAYOUT_METHODS,
   fetchKycState,
   pickIdPhoto,
   publishCreatorProfile,
-  savePayoutDestination,
   submitVerification,
+  updatePayoutHandle,
   uploadIdPhoto,
   type KycState,
-  type PayoutKind,
-  type UsdcNetwork,
+  type PayoutMethod,
 } from "@/lib/kyc";
 import type { PovCategory } from "@/types";
 
@@ -87,12 +84,9 @@ export default function BecomeCreatorScreen() {
   const [storagePath, setStoragePath] = useState<string | null>(null);
   const [photoSource, setPhotoSource] = useState<"camera" | "library">("camera");
 
-  // Payout destination form
-  const [payoutKind, setPayoutKind] = useState<PayoutKind>("usdc");
-  const [usdcNetwork, setUsdcNetwork] = useState<UsdcNetwork>("polygon");
-  const [payoutAddress, setPayoutAddress] = useState<string>("");
+  // Payout form
+  const [payoutMethod, setPayoutMethod] = useState<PayoutMethod>("paypal");
   const [payoutHandle, setPayoutHandle] = useState<string>("");
-  const [payoutLabel, setPayoutLabel] = useState<string>("");
   const [agreed, setAgreed] = useState<boolean>(false);
 
   // Pull existing KYC state on mount so returning creators don't re-verify.
@@ -108,12 +102,8 @@ export default function BecomeCreatorScreen() {
         setDobMonth(m);
         setDobDay(d);
       }
-      if (state.payoutMethod) {
-        setPayoutKind(state.payoutMethod);
-        // Only P2P kinds carry a handle; usdc/bank use address.
-        const isP2p = ["paypal", "venmo", "cashapp", "zelle"].includes(state.payoutMethod);
-        if (isP2p && state.payoutHandle) setPayoutHandle(state.payoutHandle);
-      }
+      if (state.payoutMethod) setPayoutMethod(state.payoutMethod);
+      if (state.payoutHandle) setPayoutHandle(state.payoutHandle);
 
       if (state.kycStatus === "verified" && state.payoutsEnabled) {
         setStage("profile");
@@ -195,21 +185,9 @@ export default function BecomeCreatorScreen() {
   }, [legalName, dobValid, dobString, idPhotoBase64, loadKyc]);
 
   const handleSavePayout = useCallback(async (): Promise<void> => {
-    const dest = PAYOUT_DESTINATIONS.find((d) => d.id === payoutKind);
-    if (!dest) {
-      setError("Pick a payout destination");
+    if (!payoutHandle.trim()) {
+      setError("Enter your payout handle");
       return;
-    }
-    if (dest.field === "address") {
-      if (!payoutAddress.trim()) {
-        setError(dest.hint);
-        return;
-      }
-    } else {
-      if (!payoutHandle.trim()) {
-        setError(dest.hint);
-        return;
-      }
     }
     if (!agreed) {
       setError("Agree to the creator terms first");
@@ -218,22 +196,16 @@ export default function BecomeCreatorScreen() {
     setLoading(true);
     setError(null);
     try {
-      await savePayoutDestination({
-        kind: payoutKind,
-        address: dest.field === "address" ? payoutAddress.trim() : undefined,
-        network: payoutKind === "usdc" ? usdcNetwork : undefined,
-        handle: dest.field === "handle" ? payoutHandle.trim() : undefined,
-        label: payoutLabel.trim() || undefined,
-      });
+      await updatePayoutHandle({ method: payoutMethod, handle: payoutHandle.trim() });
       haptic("success");
       await loadKyc();
       setStage("profile");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save payout destination");
+      setError(err instanceof Error ? err.message : "Could not save payout method");
     } finally {
       setLoading(false);
     }
-  }, [payoutKind, payoutAddress, payoutHandle, payoutLabel, usdcNetwork, agreed, loadKyc]);
+  }, [payoutMethod, payoutHandle, agreed, loadKyc]);
 
   const handlePublish = useCallback(async (): Promise<void> => {
     if (identity.trim().length === 0) {
@@ -274,13 +246,13 @@ export default function BecomeCreatorScreen() {
         <Text style={styles.doneBody}>
           Identity verified, payouts connected, and your studio is live. Upload your first POV
           episode, set your access levels, and go live whenever you&apos;re ready. Payouts run
-          weekly to your {payoutKind} destination.
+          weekly to your {payoutMethod} handle.
         </Text>
         <View style={styles.summary}>
           <SummaryRow label="Identity" value={identity || "Verified creator"} />
           <SummaryRow label="Subscription" value={`${formatMoney(price)}/mo`} />
           <SummaryRow label="Your share" value={`${formatMoney(price * 0.8)} (80%)`} />
-          <SummaryRow label="Payouts" value={`${payoutKind} · weekly`} />
+          <SummaryRow label="Payouts" value={`${payoutMethod} · weekly`} />
           <SummaryRow label="Status" value="Approved" />
         </View>
         <Button label="Open creator studio" onPress={() => router.replace("/(tabs)/studio")} style={{ marginTop: 24 }} />
@@ -508,119 +480,40 @@ export default function BecomeCreatorScreen() {
             </View>
           ) : null}
 
-          {/* Stage: payout destination */}
+          {/* Stage: payout handle */}
           {stage === "payout" ? (
             <View style={{ gap: 14, marginTop: 18 }}>
-              <Text style={styles.fieldLabel}>PAYOUT DESTINATION</Text>
-              <Text style={styles.fieldHint}>
-                Where we send your earnings. USDC is instant and works worldwide; bank ACH takes 1–2 business days.
+              <Text style={styles.fieldLabel}>PAYOUT METHOD</Text>
+              <View style={styles.methodGrid}>
+                {PAYOUT_METHODS.map((m) => (
+                  <PressableScale
+                    key={m.id}
+                    style={{ flex: 1 }}
+                    scaleTo={0.94}
+                    hapticStyle="medium"
+                    onPress={() => setPayoutMethod(m.id)}
+                  >
+                    <View style={[styles.methodCard, payoutMethod === m.id && styles.methodCardActive]}>
+                      {methodIcon(m.id)}
+                      <Text style={[styles.methodLabel, payoutMethod === m.id && { color: Colors.ink }]}>
+                        {m.label}
+                      </Text>
+                    </View>
+                  </PressableScale>
+                ))}
+              </View>
+              <Text style={styles.fieldLabel}>
+                {PAYOUT_METHODS.find((m) => m.id === payoutMethod)?.hint.toUpperCase()}
               </Text>
-
-              {/* Destination grid: 2 columns of 3, USDC highlighted as recommended */}
-              <View style={styles.destGrid}>
-                {PAYOUT_DESTINATIONS.map((d) => {
-                  const active = payoutKind === d.id;
-                  const isUsdc = d.id === "usdc";
-                  return (
-                    <PressableScale
-                      key={d.id}
-                      style={{ flex: 1 }}
-                      scaleTo={0.95}
-                      hapticStyle="medium"
-                      onPress={() => setPayoutKind(d.id)}
-                    >
-                      <View style={[styles.destCard, active && styles.destCardActive]}>
-                        <View style={styles.destHeader}>
-                          {methodIcon(d.id)}
-                          {isUsdc ? (
-                            <View style={styles.recommendedTag}>
-                              <Text style={styles.recommendedText}>INSTANT</Text>
-                            </View>
-                          ) : null}
-                        </View>
-                        <Text style={[styles.destLabel, active && { color: Colors.ink }]}>
-                          {d.label}
-                        </Text>
-                        <Text style={[styles.destBlurb, active && { color: "rgba(8,8,10,0.7)" }]}>
-                          {d.blurb}
-                        </Text>
-                      </View>
-                    </PressableScale>
-                  );
-                })}
-              </View>
-
-              {/* USDC network selector */}
-              {payoutKind === "usdc" ? (
-                <View style={{ gap: 8 }}>
-                  <Text style={styles.fieldLabel}>NETWORK</Text>
-                  <View style={styles.networkRow}>
-                    {USDC_NETWORKS.map((n) => (
-                      <PressableScale
-                        key={n}
-                        style={{ flex: 1 }}
-                        scaleTo={0.94}
-                        hapticStyle="light"
-                        onPress={() => setUsdcNetwork(n)}
-                      >
-                        <View style={[styles.networkChip, usdcNetwork === n && styles.networkChipActive]}>
-                          <Text style={[styles.networkChipText, usdcNetwork === n && { color: Colors.ink }]}>
-                            {n.toUpperCase()}
-                          </Text>
-                        </View>
-                      </PressableScale>
-                    ))}
-                  </View>
-                </View>
-              ) : null}
-
-              {/* Address input (usdc / bank) */}
-              {PAYOUT_DESTINATIONS.find((d) => d.id === payoutKind)?.field === "address" ? (
-                <View style={{ gap: 8 }}>
-                  <Text style={styles.fieldLabel}>
-                    {PAYOUT_DESTINATIONS.find((d) => d.id === payoutKind)?.hint.toUpperCase()}
-                  </Text>
-                  <TextInput
-                    value={payoutAddress}
-                    onChangeText={setPayoutAddress}
-                    placeholder={PAYOUT_DESTINATIONS.find((d) => d.id === payoutKind)?.hint ?? "Address"}
-                    placeholderTextColor={Colors.textDim}
-                    style={[styles.input, styles.monoInput]}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    keyboardType={PAYOUT_DESTINATIONS.find((d) => d.id === payoutKind)?.keyboardType ?? "default"}
-                  />
-                </View>
-              ) : (
-                <View style={{ gap: 8 }}>
-                  <Text style={styles.fieldLabel}>
-                    {PAYOUT_DESTINATIONS.find((d) => d.id === payoutKind)?.hint.toUpperCase()}
-                  </Text>
-                  <TextInput
-                    value={payoutHandle}
-                    onChangeText={setPayoutHandle}
-                    placeholder={PAYOUT_DESTINATIONS.find((d) => d.id === payoutKind)?.hint ?? "Handle"}
-                    placeholderTextColor={Colors.textDim}
-                    style={styles.input}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    keyboardType={PAYOUT_DESTINATIONS.find((d) => d.id === payoutKind)?.keyboardType ?? "default"}
-                  />
-                </View>
-              )}
-
-              {/* Optional label */}
-              <View style={{ gap: 8 }}>
-                <Text style={styles.fieldLabel}>NICKNAME (OPTIONAL)</Text>
-                <TextInput
-                  value={payoutLabel}
-                  onChangeText={setPayoutLabel}
-                  placeholder="e.g. My USDC wallet"
-                  placeholderTextColor={Colors.textDim}
-                  style={styles.input}
-                  maxLength={40}
-                />
-              </View>
+              <TextInput
+                value={payoutHandle}
+                onChangeText={setPayoutHandle}
+                placeholder={PAYOUT_METHODS.find((m) => m.id === payoutMethod)?.hint ?? "Handle"}
+                placeholderTextColor={Colors.textDim}
+                style={styles.input}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
 
               <PressableScale onPress={() => setAgreed((v) => !v)} scaleTo={0.97}>
                 <View style={styles.termsRow}>
@@ -636,9 +529,9 @@ export default function BecomeCreatorScreen() {
               </PressableScale>
 
               <Button
-                label={loading ? "Saving…" : "Save payout destination"}
+                label={loading ? "Saving…" : "Save payout method"}
                 onPress={() => void handleSavePayout()}
-                disabled={loading || !agreed}
+                disabled={loading || !payoutHandle.trim() || !agreed}
                 icon={loading ? <Loader2 size={16} color={Colors.ink} /> : undefined}
               />
               {kyc?.kycStatus !== "verified" ? (
@@ -663,7 +556,7 @@ export default function BecomeCreatorScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.verifiedTitle}>Verified &amp; ready</Text>
                   <Text style={styles.verifiedBody}>
-                    Identity approved · {payoutKind} payouts connected. Finish your profile to
+                    Identity approved · {payoutMethod} payouts connected. Finish your profile to
                     go live.
                   </Text>
                 </View>
@@ -774,9 +667,7 @@ export default function BecomeCreatorScreen() {
   );
 }
 
-function methodIcon(id: PayoutKind): React.ReactNode {
-  if (id === "usdc") return <Coins size={16} color={Colors.ink} />;
-  if (id === "bank") return <Landmark size={16} color={Colors.ink} />;
+function methodIcon(id: PayoutMethod): React.ReactNode {
   if (id === "paypal") return <CardIcon size={16} color={Colors.ink} />;
   if (id === "venmo") return <Wallet size={16} color={Colors.ink} />;
   if (id === "cashapp") return <Banknote size={16} color={Colors.ink} />;
@@ -1021,42 +912,20 @@ const styles = StyleSheet.create({
   },
   reviewTitle: { color: Colors.text, fontSize: 17, fontWeight: "900", letterSpacing: -0.3 },
   reviewBody: { color: Colors.textMid, fontSize: 12.5, fontWeight: "600", lineHeight: 19, textAlign: "center" },
-  // Payout destination
-  destGrid: { flexDirection: "row", flexWrap: "wrap", gap: 9 },
-  destCard: {
-    width: "48%",
-    minHeight: 84,
+  // Payout method
+  methodGrid: { flexDirection: "row", gap: 9 },
+  methodCard: {
+    height: 56,
     borderRadius: Radius.md,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 12,
-    gap: 6,
-  },
-  destCardActive: { backgroundColor: Colors.lime, borderColor: Colors.lime },
-  destHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  destLabel: { color: Colors.text, fontSize: 13, fontWeight: "900", letterSpacing: -0.2 },
-  destBlurb: { color: Colors.textDim, fontSize: 10.5, fontWeight: "600", lineHeight: 14 },
-  recommendedTag: {
-    backgroundColor: Colors.ink,
-    borderRadius: 5,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-  },
-  recommendedText: { color: Colors.lime, fontSize: 8.5, fontWeight: "900", letterSpacing: 0.6 },
-  networkRow: { flexDirection: "row", gap: 7 },
-  networkChip: {
-    height: 40,
-    borderRadius: Radius.sm,
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
     alignItems: "center",
     justifyContent: "center",
+    gap: 6,
   },
-  networkChipActive: { backgroundColor: Colors.lime, borderColor: Colors.lime },
-  networkChipText: { color: Colors.text, fontSize: 11, fontWeight: "900", letterSpacing: 0.4 },
-  monoInput: { fontFamily: "monospace", fontSize: 13.5 },
+  methodCardActive: { backgroundColor: Colors.lime, borderColor: Colors.lime },
+  methodLabel: { color: Colors.text, fontSize: 12.5, fontWeight: "900" },
   termsRow: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
   check: {
     width: 22,

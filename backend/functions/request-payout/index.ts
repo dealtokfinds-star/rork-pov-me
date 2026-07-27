@@ -20,24 +20,16 @@ Deno.serve(async (req) => {
     const admin = createAdminClient();
 
     const { data: profile } = await admin.from("profiles")
-      .select("id, payout_method, payout_handle, payout_address, payout_network, payout_account_last4, payout_label, stripe_payouts_enabled, pending_payout, payout_balance, lifetime_earnings")
+      .select("id, payout_method, payout_handle, stripe_payouts_enabled, pending_payout, payout_balance, lifetime_earnings")
       .eq("id", user.userId)
       .maybeSingle();
 
     if (!profile) return json({ error: "Profile not found" }, 404);
-    if (!profile.payout_method) {
-      return json({ error: "Add a payout destination first (USDC, bank ACH, PayPal, Venmo, Cash App, or Zelle)" }, 400);
-    }
-    // P2P methods require a handle; crypto/bank require an address.
-    const needsHandle = ["paypal", "venmo", "cashapp", "zelle"].includes(profile.payout_method);
-    if (needsHandle && !profile.payout_handle) {
-      return json({ error: "Add a payout handle first" }, 400);
-    }
-    if (!needsHandle && !profile.payout_address) {
-      return json({ error: "Add a payout address first" }, 400);
+    if (!profile.payout_method || !profile.payout_handle) {
+      return json({ error: "Add a payout method first (PayPal, Venmo, CashApp, or Zelle)" }, 400);
     }
     if (!profile.stripe_payouts_enabled) {
-      return json({ error: "Payouts not enabled — add a payout destination" }, 400);
+      return json({ error: "Payouts not enabled — add a payout method" }, 400);
     }
 
     // Available balance = payout_balance (accrued creator share, platform-managed)
@@ -56,16 +48,13 @@ Deno.serve(async (req) => {
       return json({ error: "Minimum payout is $1.00" }, 400);
     }
 
-    // Insert a payout request row — admin marks it paid after sending manually.
-    // Snapshot the destination so the admin queue shows exactly where to send.
+    // Insert a payout request row — admin marks it paid after sending manually
     const { data: reqRow, error: reqErr } = await admin.from("payout_requests").insert({
       creator_id: user.userId,
       amount,
       status: "requested",
       payout_method: profile.payout_method,
       payout_handle: profile.payout_handle,
-      payout_address: profile.payout_address,
-      payout_network: profile.payout_network,
       requested_at: new Date().toISOString(),
     }).select("id").single();
     if (reqErr) {
