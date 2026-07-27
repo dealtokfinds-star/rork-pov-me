@@ -43,6 +43,12 @@ export interface KycState {
   payoutPaypalEmail: string | null;
   payoutBankAccountLast4: string | null;
   payoutBankCountry: string | null;
+  /** Creator profile fields (prefilled for returning creators). */
+  identity: string | null;
+  categories: string[] | null;
+  subPrice: number | null;
+  isCreator: boolean;
+  onboarded: boolean;
 }
 
 /** Fetch the current user's KYC + payout state from their profile row. */
@@ -52,7 +58,7 @@ export async function fetchKycState(): Promise<KycState | null> {
   const { data, error } = await supabase
     .from("profiles")
     .select(
-      "kyc_status, kyc_last_reason, kyc_submitted_at, kyc_reviewed_at, payout_method, payout_paypal_email, payout_bank_account_last4, payout_bank_country",
+      "kyc_status, kyc_last_reason, kyc_submitted_at, kyc_reviewed_at, payout_method, payout_paypal_email, payout_bank_account_last4, payout_bank_country, identity, categories, sub_price, is_creator, onboarded",
     )
     .eq("id", uid)
     .maybeSingle();
@@ -71,6 +77,11 @@ export async function fetchKycState(): Promise<KycState | null> {
     payoutPaypalEmail: data.payout_paypal_email ?? null,
     payoutBankAccountLast4: data.payout_bank_account_last4 ?? null,
     payoutBankCountry: data.payout_bank_country ?? null,
+    identity: data.identity ?? null,
+    categories: Array.isArray(data.categories) ? (data.categories as string[]) : null,
+    subPrice: typeof data.sub_price === "number" ? data.sub_price : null,
+    isCreator: Boolean(data.is_creator),
+    onboarded: Boolean(data.onboarded),
   };
 }
 

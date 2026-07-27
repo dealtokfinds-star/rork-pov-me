@@ -91,16 +91,26 @@ export default function BecomeCreatorScreen() {
       const state = await fetchKycState();
       if (!state) return;
       setKyc(state);
+      // Prefill any saved profile fields so returning creators don't re-enter them.
+      if (state.identity) setIdentity(state.identity);
+      if (Array.isArray(state.categories) && state.categories.length > 0) {
+        setPicked(state.categories as PovCategory[]);
+      }
+      if (typeof state.subPrice === "number" && state.subPrice > 0) {
+        setPrice(state.subPrice);
+      }
       // KYC no longer gates anything; just prefill payout method if present.
       if (state.payoutMethod) {
         setPayoutMethod(state.payoutMethod);
-        setStage("profile");
         if (state.payoutMethod === "paypal" && state.payoutPaypalEmail) {
           setPaypalEmail(state.payoutPaypalEmail);
         }
+        setStage("profile");
+        setStep(3);
       } else if (state.kycStatus === "verified") {
         // Already verified but no payout details yet.
         setStage("payout");
+        setStep(3);
       }
     } catch (err) {
       console.log("[povme] loadKyc:", err);
@@ -507,6 +517,13 @@ export default function BecomeCreatorScreen() {
       <ProgressBar progress={(step + 1) / 4} />
       <Text style={styles.step}>Step {step + 1} of 4</Text>
 
+      {error && step < 3 ? (
+        <View style={styles.errorCard}>
+          <AlertCircle size={16} color={Colors.danger} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
+
       {step === 0 ? (
         <View style={{ gap: 14 }}>
           <Text style={styles.title}>What life are people stepping into?</Text>
@@ -522,7 +539,18 @@ export default function BecomeCreatorScreen() {
             style={styles.input}
             maxLength={40}
           />
-          <Button label="Continue" onPress={() => setStep(1)} style={{ marginTop: 12 }} />
+          <Button
+            label="Continue"
+            onPress={() => {
+              if (identity.trim().length === 0) {
+                setError("Add your identity tag first.");
+                return;
+              }
+              setError(null);
+              setStep(1);
+            }}
+            style={{ marginTop: 12 }}
+          />
         </View>
       ) : null}
 
@@ -548,7 +576,17 @@ export default function BecomeCreatorScreen() {
               />
             ))}
           </View>
-          <Button label="Continue" onPress={() => setStep(2)} />
+          <Button
+            label="Continue"
+            onPress={() => {
+              if (picked.length === 0) {
+                setError("Pick at least one POV category.");
+                return;
+              }
+              setError(null);
+              setStep(2);
+            }}
+          />
         </View>
       ) : null}
 
