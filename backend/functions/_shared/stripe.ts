@@ -22,38 +22,26 @@ function getSecretKey(): string {
   return key;
 }
 
-/** URL-encode a flat or arbitrarily-nested object for x-www-form-urlencoded bodies. */
+/** URL-encode a flat or one-level-nested object for x-www-form-urlencoded bodies. */
 function encodeForm(params: Record<string, unknown>): string {
   const parts: string[] = [];
-
-  // Recursively walk the value tree, building bracketed keys like
-  // `capabilities[transfers][requested]`. Primitives get URL-encoded; nested
-  // objects/arrays recurse; `undefined`/`null` are skipped.
-  const walk = (keyPrefix: string, value: unknown): void => {
-    if (value === undefined || value === null) return;
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue;
     if (Array.isArray(value)) {
       for (const v of value) {
         if (v === undefined || v === null) continue;
-        if (typeof v === "object") {
-          walk(`${keyPrefix}[]`, v);
-        } else {
-          parts.push(`${encodeURIComponent(`${keyPrefix}[]`)}=${encodeURIComponent(String(v))}`);
-        }
+        parts.push(`${encodeURIComponent(key)}[]=${encodeURIComponent(String(v))}`);
       }
-      return;
-    }
-    if (typeof value === "object") {
+    } else if (typeof value === "object") {
       for (const [subKey, subVal] of Object.entries(value as Record<string, unknown>)) {
         if (subVal === undefined || subVal === null) continue;
-        walk(`${keyPrefix}[${subKey}]`, subVal);
+        parts.push(
+          `${encodeURIComponent(key)}[${encodeURIComponent(subKey)}]=${encodeURIComponent(String(subVal))}`,
+        );
       }
-      return;
+    } else {
+      parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
     }
-    parts.push(`${encodeURIComponent(keyPrefix)}=${encodeURIComponent(String(value))}`);
-  };
-
-  for (const [key, value] of Object.entries(params)) {
-    walk(key, value);
   }
   return parts.join("&");
 }
