@@ -65,9 +65,12 @@ export interface PayoutRequestRow {
   creator_id: string;
   amount: number;
   status: string;
-  payout_method: string | null;
-  payout_handle: string | null;
-  admin_note: string | null;
+  /** Stripe payout method (e.g. "standard"). */
+  method: string | null;
+  /** Stripe payout id (po_...). */
+  stripe_payout_id: string | null;
+  /** Reason if Stripe marked the payout failed. */
+  failure_reason: string | null;
   requested_at: string | null;
   processed_at: string | null;
   name: string | null;
@@ -109,8 +112,8 @@ export function useAdmin() {
           .order("uploaded_at", { ascending: false })
           .limit(50),
         supabase
-          .from("payout_requests")
-          .select("id, creator_id, amount, status, payout_method, payout_handle, admin_note, requested_at, processed_at, name:profiles!payout_requests_creator_id_fkey(name), handle:profiles!payout_requests_creator_id_fkey(handle)")
+          .from("payouts")
+          .select("id, creator_id, amount, status, method, stripe_payout_id, failure_reason, requested_at, processed_at, name:profiles!payouts_creator_id_fkey(name), handle:profiles!payouts_creator_id_fkey(handle)")
           .order("requested_at", { ascending: false })
           .limit(50),
       ]);

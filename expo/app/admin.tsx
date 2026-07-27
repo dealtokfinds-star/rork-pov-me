@@ -38,8 +38,6 @@ export default function AdminScreen() {
   const [approved, setApproved] = useState<string[]>([]);
   const [verifApproved, setVerifApproved] = useState<string[]>([]);
   const [verifRejected, setVerifRejected] = useState<string[]>([]);
-  const [payoutPaid, setPayoutPaid] = useState<string[]>([]);
-  const [payoutFailed, setPayoutFailed] = useState<string[]>([]);
   const [idPreviewUrl, setIdPreviewUrl] = useState<string | null>(null);
   const [idPreviewLoading, setIdPreviewLoading] = useState<string | null>(null);
 
@@ -61,7 +59,7 @@ export default function AdminScreen() {
         <StatTile label="ID reviews" value={`${verifications.filter((v) => v.status === "pending").length}`} sub="awaiting review" accent={Colors.cyan} />
       </View>
       <View style={styles.statRow}>
-        <StatTile label="Payout requests" value={`${payoutRequests.filter((p) => p.status === "requested").length}`} sub="to process" accent={Colors.gold} />
+        <StatTile label="Stripe payouts" value={`${payoutRequests.filter((p) => p.status === "pending" || p.status === "in_transit").length}`} sub="in flight" accent={Colors.gold} />
         <StatTile label="Pending creators" value={`${creators.filter((c) => c.kyc_status === "pending" || c.kyc_status === "unverified").length}`} sub="KYC submitted" accent={Colors.lime} />
       </View>
 
@@ -288,22 +286,6 @@ export default function AdminScreen() {
       {tab === "payouts" ? (
         <PayoutQueue
           requests={payoutRequests}
-          paid={payoutPaid}
-          failed={payoutFailed}
-          onMarkPaid={async (id) => {
-            const r = await adminAction("mark_payout_paid", { payout_id: id });
-            if (r.ok) {
-              setPayoutPaid((p) => [...p, id]);
-              haptic("success");
-            }
-          }}
-          onMarkFailed={async (id) => {
-            const r = await adminAction("mark_payout_failed", { payout_id: id, note: "Handle invalid" });
-            if (r.ok) {
-              setPayoutFailed((p) => [...p, id]);
-              haptic("heavy");
-            }
-          }}
           isLoading={adminLoading}
         />
       ) : null}
@@ -428,40 +410,34 @@ function VerificationQueue({
 }
 
 // ─── Payout queue ─────────────────────────────────────────────────────────
+// Stripe-managed payouts — the webhook updates statuses (pending → paid / failed).
+// This view is read-only; admins watch the queue rather than process it manually.
 
 function PayoutQueue({
   requests,
-  paid,
-  failed,
-  onMarkPaid,
-  onMarkFailed,
   isLoading,
 }: {
   requests: PayoutRequestRow[];
-  paid: string[];
-  failed: string[];
-  onMarkPaid: (id: string) => Promise<void>;
-  onMarkFailed: (id: string) => Promise<void>;
   isLoading: boolean;
 }) {
-  const pending = requests.filter((r) => r.status === "requested" && !paid.includes(r.id) && !failed.includes(r.id));
-  const processed = requests.filter((r) => r.status !== "requested" || paid.includes(r.id) || failed.includes(r.id));
+  const inFlight = requests.filter((r) => r.status === "pending" || r.status === "in_transit" || r.status === "requested");
+  const settled = requests.filter((r) => r.status === "paid" || r.status === "failed" || r.status === "canceled");
 
   return (
     <View style={{ paddingHorizontal: 18, gap: 10, marginTop: 18 }}>
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Payouts to process</Text>
+        <Text style={styles.cardTitle}>Stripe payouts</Text>
         <Text style={styles.cardMeta}>
-          {pending.length} request{pending.length === 1 ? "" : "s"} · total {formatMoney(pending.reduce((s, r) => s + Number(r.amount), 0))}
+          {inFlight.length} in flight · {formatMoney(inFlight.reduce((s, r) => s + Number(r.amount), 0))} en route
         </Text>
       </View>
 
       {isLoading ? (
-        <Text style={styles.cardMeta}>Loading payout queue…</Text>
-      ) : pending.length === 0 ? (
-        <Text style={styles.cardMeta}>No payout requests waiting. 🎉</Text>
+        <Text style={styles.cardMeta}>Loading payouts…</Text>
+      ) : inFlight.length === 0 ? (
+        <Text style={styles.cardMeta}>No payouts in flight. 🎉</Text>
       ) : (
-        pending.map((r) => (
+        inFlight.map((r) => (
           <View key={r.id} style={styles.card}>
             <View style={styles.cardHead}>
               <View style={[styles.thumb, { backgroundColor: Colors.surfaceHi, alignItems: "center", justifyContent: "center" }]}>
@@ -470,7 +446,7 @@ function PayoutQueue({
               <View style={{ flex: 1 }}>
                 <Text style={styles.cardTitle}>{r.name ?? r.handle ?? "Creator"}</Text>
                 <Text style={styles.cardMeta}>
-                  {r.payout_method} · {r.payout_handle}
+                  Stripe · {r.stripe_payout_id ?? "—"}
                 </Text>
                 <Text style={styles.cardMeta}>
                   Requested {r.requested_at ? new Date(r.requested_at).toLocaleDateString() : "—"}
@@ -478,29 +454,18 @@ function PayoutQueue({
               </View>
               <Text style={styles.bigValue}>{formatMoney(Number(r.amount))}</Text>
             </View>
-            <View style={styles.actionRow}>
-              <ActionBtn
-                icon={<Check size={14} color={Colors.lime} />}
-                label="Mark paid"
-                tint={Colors.lime}
-                onPress={() => void onMarkPaid(r.id)}
-              />
-              <ActionBtn
-                icon={<X size={14} color={Colors.danger} />}
-                label="Failed"
-                tint={Colors.danger}
-                onPress={() => void onMarkFailed(r.id)}
-              />
-            </View>
+            <Text style={[styles.cardMeta, { color: Colors.gold }]}>
+              {r.status} — Stripe will update this automatically
+            </Text>
           </View>
         ))
       )}
 
-      {processed.length > 0 ? (
+      {settled.length > 0 ? (
         <View style={{ marginTop: 10, gap: 8 }}>
-          <Text style={styles.cardMeta}>Recently processed</Text>
-          {processed.slice(0, 8).map((r) => {
-            const done = paid.includes(r.id) || r.status === "paid";
+          <Text style={styles.cardMeta}>Recently settled</Text>
+          {settled.slice(0, 8).map((r) => {
+            const failed = r.status === "failed" || r.status === "canceled";
             return (
               <View key={r.id} style={[styles.card, { opacity: 0.6 }]}>
                 <View style={styles.cardHead}>
@@ -509,10 +474,13 @@ function PayoutQueue({
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.cardTitle}>{r.name ?? r.handle ?? "Creator"}</Text>
-                    <Text style={styles.cardMeta}>{r.payout_method} · {formatMoney(Number(r.amount))}</Text>
+                    <Text style={styles.cardMeta}>Stripe · {formatMoney(Number(r.amount))}</Text>
+                    {failed && r.failure_reason ? (
+                      <Text style={[styles.cardMeta, { color: Colors.danger }]}>{r.failure_reason}</Text>
+                    ) : null}
                   </View>
-                  <Text style={[styles.payoutStatus, !done && { color: Colors.danger }]}>
-                    {done ? "paid" : r.status}
+                  <Text style={[styles.payoutStatus, failed && { color: Colors.danger }]}>
+                    {r.status}
                   </Text>
                 </View>
               </View>

@@ -1,15 +1,24 @@
 import { requireAuth, createAdminClient, AuthError, corsHeaders, json } from "../_shared/auth.ts";
+import {
+  createConnectAccount,
+  createAccountLink,
+  retrieveAccount,
+  StripeError,
+  type Account,
+} from "../_shared/stripe.ts";
 
 /**
  * POST /update-payout-handle
- * Saves the creator's manual payout handle (PayPal/Venmo/CashApp/Zelle).
- * Replaces Stripe Connect hosted onboarding.
+ * Replaced the manual PayPal/Venmo/CashApp/Zelle handle save with a Stripe
+ * Connect onboarding trigger. Creates (or reuses) the creator's Express
+ * account and returns a fresh hosted onboarding link.
  *
- * Body: { payout_method: string, payout_handle: string }
- * Returns: { ok: true }
+ * Body: { country?: string, refresh_url?: string, return_url?: string }
+ * Returns: { ok: true, url: string, account_id: string, payouts_enabled: boolean, details_submitted: boolean }
+ *
+ * The app opens `url` in expo-web-browser; when onboarding completes, the
+ * `account.updated` webhook flips stripe_payouts_enabled on the profile.
  */
-const ALLOWED_METHODS = ["paypal", "venmo", "cashapp", "zelle"];
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -17,39 +26,84 @@ Deno.serve(async (req) => {
   try {
     const user = await requireAuth(req);
     const body = await req.json().catch(() => ({})) as {
-      payout_method?: string;
-      payout_handle?: string;
+      country?: string;
+      refresh_url?: string;
+      return_url?: string;
     };
 
-    const method = (body.payout_method ?? "").toLowerCase().trim();
-    const handle = (body.payout_handle ?? "").trim();
-
-    if (!ALLOWED_METHODS.includes(method)) {
-      return json({ error: `Method must be one of: ${ALLOWED_METHODS.join(", ")}` }, 400);
-    }
-    if (handle.length < 3) {
-      return json({ error: "Payout handle is too short" }, 400);
-    }
-    if (handle.length > 120) {
-      return json({ error: "Payout handle is too long" }, 400);
-    }
-
     const admin = createAdminClient();
-    const { error } = await admin.from("profiles").update({
-      payout_method: method,
-      payout_handle: handle,
-      stripe_payouts_enabled: true, // manual payouts are "enabled" once a handle is set
-      stripe_account_status: "manual",
+    const { data: profile } = await admin.from("profiles")
+      .select("id, email, stripe_account_id, stripe_payouts_enabled")
+      .eq("id", user.userId)
+      .maybeSingle();
+
+    if (!profile) return json({ error: "Profile not found" }, 404);
+
+    // Already fully enabled — no need to onboard again.
+    if (profile.stripe_account_id && profile.stripe_payouts_enabled) {
+      return json({
+        ok: true,
+        url: null,
+        account_id: profile.stripe_account_id,
+        payouts_enabled: true,
+        details_submitted: true,
+      });
+    }
+
+    const country = body.country ?? "US";
+    const projectBase = Deno.env.get("SUPABASE_URL") ?? "https://povme.supabase.co";
+    const refreshUrl = body.refresh_url ?? `${projectBase}/functions/v1/update-payout-handle`;
+    const returnUrl = body.return_url ?? `${projectBase}/functions/v1/update-payout-handle?done=1`;
+
+    let accountId: string = profile.stripe_account_id as string;
+    let account: Account | null = null;
+
+    if (!accountId) {
+      account = await createConnectAccount({
+        email: profile.email ?? user.email ?? "",
+        country,
+        metadata_user_id: user.userId,
+      });
+      accountId = account.id;
+    } else {
+      account = await retrieveAccount(accountId);
+    }
+
+    const link = await createAccountLink({
+      account: accountId,
+      refresh_url: refreshUrl,
+      return_url: returnUrl,
+    });
+
+    const payoutsEnabled = account.payouts_enabled ?? false;
+    const detailsSubmitted = account.details_submitted ?? false;
+    const accountStatus = payoutsEnabled ? "enabled" : "restricted";
+
+    await admin.from("profiles").update({
+      stripe_account_id: accountId,
+      stripe_account_status: accountStatus,
+      stripe_onboarding_url: link.url,
+      stripe_payouts_enabled: payoutsEnabled,
+      // Mark the legacy manual-payout columns as Stripe-managed for any code
+      // that still reads them.
+      payout_method: payoutsEnabled ? "stripe" : null,
+      payout_handle: payoutsEnabled ? "Stripe Connect" : null,
       updated_at: new Date().toISOString(),
     }).eq("id", user.userId);
-    if (error) {
-      console.error("[update-payout-handle] error:", error.message);
-      return json({ error: "Could not save payout handle" }, 500);
-    }
 
-    return json({ ok: true });
+    return json({
+      ok: true,
+      url: link.url,
+      account_id: accountId,
+      payouts_enabled: payoutsEnabled,
+      details_submitted: detailsSubmitted,
+    });
   } catch (err) {
     if (err instanceof AuthError) return json({ error: "Unauthorized" }, 401);
+    if (err instanceof StripeError) {
+      console.error("[update-payout-handle] Stripe error:", err.status, err.body);
+      return json({ error: err.message }, err.status);
+    }
     console.error("[update-payout-handle] error:", err);
     return json({ error: "Internal server error" }, 500);
   }
