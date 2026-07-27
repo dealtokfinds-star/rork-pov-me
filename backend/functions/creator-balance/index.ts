@@ -26,7 +26,7 @@ Deno.serve(async (req) => {
     const admin = createAdminClient();
 
     const { data: profile } = await admin.from("profiles")
-      .select("id, payout_method, payout_handle, stripe_payouts_enabled, lifetime_earnings, pending_payout, payout_balance")
+      .select("id, payout_method, payout_handle, payout_address, payout_network, payout_account_last4, payout_label, stripe_payouts_enabled, lifetime_earnings, pending_payout, payout_balance")
       .eq("id", user.userId)
       .maybeSingle();
 
@@ -49,14 +49,30 @@ Deno.serve(async (req) => {
 
     const available = Number(profile.payout_balance ?? 0);
 
+    // Build a display summary the client can show without re-fetching
+    const method = profile.payout_method ?? null;
+    let destinationSummary: string | null = null;
+    if (method === "usdc") {
+      destinationSummary = `USDC · ${(profile.payout_network ?? "").toUpperCase()} · …${profile.payout_account_last4 ?? ""}`;
+    } else if (method === "bank") {
+      destinationSummary = `Bank · ACH · ••${profile.payout_account_last4 ?? ""}`;
+    } else if (method && profile.payout_handle) {
+      destinationSummary = `${method} · ${profile.payout_handle}`;
+    }
+
     return json({
       available,
       pending: Number(profile.pending_payout ?? 0),
       instant_available: available,
       payouts: list,
       payouts_enabled: profile.stripe_payouts_enabled ?? false,
-      payout_method: profile.payout_method ?? null,
+      payout_method: method,
       payout_handle: profile.payout_handle ?? null,
+      payout_address: method === "usdc" ? profile.payout_address ?? null : null,
+      payout_network: profile.payout_network ?? null,
+      payout_account_last4: profile.payout_account_last4 ?? null,
+      payout_label: profile.payout_label ?? null,
+      destination_summary: destinationSummary,
       lifetime_earnings: Number(profile.lifetime_earnings ?? 0),
       pending_payout: Number(profile.pending_payout ?? 0),
     });

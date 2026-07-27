@@ -37,6 +37,8 @@ export default function EarningsScreen() {
   const payouts = balance?.payouts ?? [];
   const payoutMethod = balance?.payout_method ?? null;
   const payoutHandle = balance?.payout_handle ?? null;
+  const destinationSummary = balance?.destination_summary ?? null;
+  const payoutLabel = balance?.payout_label ?? null;
 
   const handleWithdraw = async (): Promise<void> => {
     setWithdrawing(true);
@@ -80,12 +82,12 @@ export default function EarningsScreen() {
           <View style={styles.pending}>
             <Clock size={14} color={Colors.gold} />
             <Text style={styles.pendingText}>
-              Payout requested — sent to your {payoutMethod ?? "payout"} handle within 1–2 business days
+              Payout requested — sent to your {destinationSummary ?? payoutMethod ?? "payout"} within 1–2 business days
             </Text>
           </View>
         ) : payoutsEnabled ? (
           <Button
-            label={withdrawing ? "Processing…" : `Withdraw to ${payoutMethod ?? "payout"}`}
+            label={withdrawing ? "Processing…" : `Withdraw to ${destinationSummary ?? payoutMethod ?? "payout"}`}
             icon={<Banknote size={16} color={Colors.ink} />}
             onPress={() => void handleWithdraw()}
             disabled={withdrawing || available < 1}
@@ -94,7 +96,7 @@ export default function EarningsScreen() {
         ) : (
           <View style={styles.disabledBox}>
             <Text style={styles.disabledText}>
-              Add a payout method (PayPal, Venmo, Cash App, or Zelle) in Become a Creator to
+              Add a payout destination (USDC, bank ACH, PayPal, Venmo, Cash App, or Zelle) in Become a Creator to
               withdraw earnings.
             </Text>
           </View>
@@ -131,12 +133,16 @@ export default function EarningsScreen() {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.accountLabel}>
-            {payoutMethod ? `${payoutMethod} · ${payoutHandle ?? ""}` : "No payout method set"}
+            {payoutLabel ?? destinationSummary ?? (payoutMethod ? `${payoutMethod} · ${payoutHandle ?? ""}` : "No payout destination set")}
           </Text>
           <Text style={styles.accountSub}>
             {payoutMethod
-              ? "Manual payouts · processed within 1–2 business days"
-              : "Add PayPal, Venmo, Cash App, or Zelle in Become a Creator"}
+              ? payoutMethod === "usdc"
+                ? "USDC stablecoin · instant · global"
+                : payoutMethod === "bank"
+                  ? "Bank ACH · 1–2 business days"
+                  : "Manual payouts · processed within 1–2 business days"
+              : "Add USDC, bank ACH, PayPal, Venmo, Cash App, or Zelle in Become a Creator"}
           </Text>
         </View>
         {payoutMethod ? <Check size={17} color={Colors.success} /> : null}
@@ -168,7 +174,7 @@ export default function EarningsScreen() {
 
       <PressableScale>
         <Text style={styles.legal}>
-          povme keeps 20% of gross revenue. Payouts are sent manually to your saved handle.
+          povme keeps 20% of gross revenue. Payouts are sent to your saved destination (USDC, bank ACH, or P2P handle).
           Taxes are your responsibility — export your annual statement from Settings.
         </Text>
       </PressableScale>

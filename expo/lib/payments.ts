@@ -170,6 +170,13 @@ export interface CreatorBalance {
   payouts_enabled: boolean;
   payout_method: string | null;
   payout_handle: string | null;
+  /** Crypto wallet address (only returned for usdc kind; null otherwise). */
+  payout_address: string | null;
+  payout_network: string | null;
+  payout_account_last4: string | null;
+  payout_label: string | null;
+  /** Human-readable summary, e.g. "USDC · POLYGON · …ab12". */
+  destination_summary: string | null;
   lifetime_earnings: number;
   pending_payout: number;
 }

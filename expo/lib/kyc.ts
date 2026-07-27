@@ -27,32 +27,105 @@ async function currentUserId(): Promise<string | null> {
  */
 
 export type KycStatus = "unverified" | "pending" | "verified" | "failed";
-export type PayoutMethod = "paypal" | "venmo" | "cashapp" | "zelle";
+
+/**
+ * Payout destination kinds. The headline option is USDC stablecoin (instant,
+ * global, no bank holdups). Bank ACH and the legacy P2P handles are still
+ * supported for creators who prefer fiat rails.
+ */
+export type PayoutKind = "usdc" | "bank" | "paypal" | "venmo" | "cashapp" | "zelle";
+export type PayoutMethod = PayoutKind; // back-compat alias
 
 export interface KycState {
   kycStatus: KycStatus;
   kycLastReason: string | null;
   legalName: string | null;
   dateOfBirth: string | null;
-  payoutMethod: PayoutMethod | null;
+  payoutMethod: PayoutKind | null;
   payoutHandle: string | null;
   payoutsEnabled: boolean;
   hasUploadedId: boolean;
 }
 
-export const PAYOUT_METHODS: Array<{ id: PayoutMethod; label: string; hint: string }> = [
-  { id: "paypal", label: "PayPal", hint: "Email or PayPal.me link" },
-  { id: "venmo", label: "Venmo", hint: "@username or phone" },
-  { id: "cashapp", label: "Cash App", hint: "$cashtag" },
-  { id: "zelle", label: "Zelle", hint: "Email or phone" },
+export interface PayoutDestinationMeta {
+  id: PayoutKind;
+  label: string;
+  blurb: string;
+  hint: string;
+  keyboardType?: "default" | "numeric" | "email-address";
+  /** field this kind uses: "address" for usdc/bank, "handle" for P2P */
+  field: "address" | "handle";
+}
+
+export const USDC_NETWORKS = ["ethereum", "polygon", "base", "solana"] as const;
+export type UsdcNetwork = (typeof USDC_NETWORKS)[number];
+
+export const PAYOUT_DESTINATIONS: PayoutDestinationMeta[] = [
+  {
+    id: "usdc",
+    label: "USDC",
+    blurb: "Stablecoin · instant · global",
+    hint: "Wallet address (0x… or Solana base58)",
+    keyboardType: "default",
+    field: "address",
+  },
+  {
+    id: "bank",
+    label: "Bank ACH",
+    blurb: "US bank · 1–2 business days",
+    hint: "Account number (6–17 digits)",
+    keyboardType: "numeric",
+    field: "address",
+  },
+  {
+    id: "paypal",
+    label: "PayPal",
+    blurb: "Email or PayPal.me",
+    hint: "Email or PayPal.me link",
+    keyboardType: "email-address",
+    field: "handle",
+  },
+  {
+    id: "venmo",
+    label: "Venmo",
+    blurb: "@username or phone",
+    hint: "@username or phone",
+    field: "handle",
+  },
+  {
+    id: "cashapp",
+    label: "Cash App",
+    blurb: "$cashtag",
+    hint: "$cashtag",
+    field: "handle",
+  },
+  {
+    id: "zelle",
+    label: "Zelle",
+    blurb: "Email or phone",
+    hint: "Email or phone",
+    keyboardType: "email-address",
+    field: "handle",
+  },
 ];
+
+/** @deprecated Use PAYOUT_DESTINATIONS. Kept for back-compat with older callers. */
+export const PAYOUT_METHODS: Array<{ id: PayoutKind; label: string; hint: string }> =
+  PAYOUT_DESTINATIONS.filter((d) => d.id !== "usdc" && d.id !== "bank").map((d) => ({
+    id: d.id,
+    label: d.label,
+    hint: d.hint,
+  }));
 
 async function authHeader(): Promise<Record<string, string>> {
   const token = await SecureStore.getItemAsync("access_token");
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-const FUNCTIONS_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+// Edge functions are served from the Rork functions host, NOT the Supabase
+// project URL. Using the wrong base here was the root cause of the previous
+// 404s on submit-verification / update-payout-handle.
+const FUNCTIONS_URL = process.env.EXPO_PUBLIC_RORK_FUNCTIONS_URL!;
 
 /** Fetch the current user's KYC + payout state from their profile row. */
 export async function fetchKycState(): Promise<KycState | null> {
@@ -206,20 +279,41 @@ export async function createSignedUrl(path: string): Promise<string | null> {
 }
 
 /**
- * Save the creator's payout handle (PayPal/Venmo/CashApp/Zelle).
- * Replaces Stripe Connect hosted onboarding.
+ * Save the creator's payout destination.
+ *
+ * Supports USDC stablecoin wallets (Ethereum/Polygon/Base/Solana), US bank
+ * ACH accounts, and the legacy P2P handles (PayPal/Venmo/CashApp/Zelle).
+ * Replaces Stripe Connect hosted onboarding and the old update-payout-handle
+ * endpoint.
+ *
+ * Returns a display summary the UI can show without re-fetching the profile.
  */
-export async function updatePayoutHandle(input: {
-  method: PayoutMethod;
-  handle: string;
-}): Promise<{ ok: boolean }> {
+export interface PayoutDestinationResult {
+  ok: boolean;
+  destination: {
+    kind: PayoutKind;
+    summary: string;
+    label: string | null;
+  };
+}
+
+export async function savePayoutDestination(input: {
+  kind: PayoutKind;
+  address?: string;
+  network?: UsdcNetwork;
+  handle?: string;
+  label?: string;
+}): Promise<PayoutDestinationResult> {
   const headers = await authHeader();
-  const res = await fetch(`${FUNCTIONS_URL}/functions/v1/update-payout-handle`, {
+  const res = await fetch(`${FUNCTIONS_URL}/save-payout-destination`, {
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
     body: JSON.stringify({
-      payout_method: input.method,
-      payout_handle: input.handle,
+      kind: input.kind,
+      address: input.address,
+      network: input.network,
+      handle: input.handle,
+      label: input.label,
     }),
   });
   const data = await res.json().catch(() => null);
@@ -227,7 +321,16 @@ export async function updatePayoutHandle(input: {
     const message = (data as { error?: string })?.error ?? `Save failed (${res.status})`;
     throw new Error(message);
   }
-  return data as { ok: boolean };
+  return data as PayoutDestinationResult;
+}
+
+/** @deprecated Use savePayoutDestination. Kept for back-compat. */
+export async function updatePayoutHandle(input: {
+  method: PayoutMethod;
+  handle: string;
+}): Promise<{ ok: boolean }> {
+  await savePayoutDestination({ kind: input.method, handle: input.handle });
+  return { ok: true };
 }
 
 /** Poll the profile row until KYC resolves or timeout. */
