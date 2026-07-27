@@ -33,13 +33,12 @@ import Colors, { Radius, microLabel } from "@/constants/colors";
 import {
   CHAT_COLORS,
   GIFTS,
-  creatorById,
   formatCount,
   formatMoney,
   randomChat,
-  streamById,
 } from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
+import { useCreator, useStream } from "@/lib/data";
 import type { ChatMessage } from "@/types";
 
 const QUICK_TIPS = [2, 5, 10, 25];
@@ -58,8 +57,8 @@ export default function LiveRoomScreen() {
     displayName,
   } = useApp();
 
-  const stream = streamById(id ?? "");
-  const creator = creatorById(stream?.creatorId ?? "");
+  const { data: stream, isLoading } = useStream(id ?? "");
+  const { data: creator } = useCreator(stream?.creatorId);
 
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     Array.from({ length: 8 }, () => randomChat()),
@@ -163,6 +162,14 @@ export default function LiveRoomScreen() {
     },
     [stream, tip, displayName, showBanner],
   );
+
+  if (isLoading) {
+    return (
+      <View style={[styles.screen, { alignItems: "center", justifyContent: "center" }]}>
+        <Text style={{ color: Colors.textMid, fontSize: 14, fontWeight: 700 }}>Loading…</Text>
+      </View>
+    );
+  }
 
   if (!stream || !creator) {
     return (

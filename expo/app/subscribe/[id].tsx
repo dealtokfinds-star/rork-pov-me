@@ -7,9 +7,9 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Avatar, Button, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { creatorById, episodesByCreator, formatCount, formatMoney } from "@/constants/mock-data";
+import { formatCount, formatMoney } from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
-import { useCreator } from "@/lib/data";
+import { useCreator, useCreatorEpisodes } from "@/lib/data";
 
 interface Tier {
   id: string;
@@ -58,10 +58,15 @@ export default function SubscribeScreen() {
   const [done, setDone] = useState<boolean>(false);
   const [processing, setProcessing] = useState<boolean>(false);
 
-  // Try real Supabase creator first, fall back to mock
-  const { data: realCreator } = useCreator(id);
-  const mockCreator = creatorById(id ?? "");
-  const creator = realCreator ?? mockCreator;
+  const { data: creator, isLoading } = useCreator(id);
+  const { data: episodes = [] } = useCreatorEpisodes(creator?.id);
+  if (isLoading) {
+    return (
+      <View style={styles.screen}>
+        <Text style={styles.title}>Loading…</Text>
+      </View>
+    );
+  }
   if (!creator) {
     return (
       <View style={styles.screen}>
@@ -72,7 +77,6 @@ export default function SubscribeScreen() {
 
   const tier = TIERS.find((t) => t.id === tierId) ?? TIERS[0];
   const price = Math.round(creator.subPrice * tier.multiplier * 100) / 100;
-  const episodes = episodesByCreator(creator.id);
   const already = isSubscribed(creator.id);
 
   const confirm = async (): Promise<void> => {

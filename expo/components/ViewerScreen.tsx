@@ -42,12 +42,11 @@ import { ChatOverlay, type ChatOverlayHandle } from "@/components/ChatOverlay";
 import { Avatar, Button, LiveBadge, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius } from "@/constants/colors";
 import {
-  creatorById,
   formatCount,
   formatMoney,
-  streamById,
 } from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
+import { useCreator, useStream } from "@/lib/data";
 import type { StreamAccess } from "@/types";
 
 interface ViewerScreenProps {
@@ -81,9 +80,10 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
     displayName,
   } = useApp();
 
-  // Resolve the stream — either from props (real host) or mock data.
-  const stream = streamById(props.streamId ?? routeParams.id ?? "");
-  const creator = creatorById(props.creatorId ?? stream?.creatorId ?? "");
+  // Resolve the stream — either from props (real host) or real Supabase data.
+  const { data: dbStream } = useStream(props.streamId ?? routeParams.id ?? "");
+  const stream = props.videoSource ? null : dbStream;
+  const { data: creator } = useCreator(props.creatorId ?? stream?.creatorId ?? "");
 
   const [viewers, setViewers] = useState<number>(stream?.viewers ?? 0);
   const [health, setHealth] = useState<ViewHealth>("loading");
@@ -205,6 +205,15 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
   // ---- not found -----------------------------------------------------------
 
   if (!stream && !props.videoSource) {
+    return (
+      <View style={[styles.screen, { paddingTop: insets.top + 60, paddingHorizontal: 24 }]}>
+        <Text style={styles.endedTitle}>This stream ended</Text>
+        <Button label="Back to live" onPress={() => router.replace("/(tabs)/live")} style={{ marginTop: 18 }} />
+      </View>
+    );
+  }
+
+  if (!creator && !props.videoSource) {
     return (
       <View style={[styles.screen, { paddingTop: insets.top + 60, paddingHorizontal: 24 }]}>
         <Text style={styles.endedTitle}>This stream ended</Text>

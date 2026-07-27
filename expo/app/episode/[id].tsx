@@ -21,15 +21,13 @@ import { EpisodeTile } from "@/components/cards";
 import { Avatar, Button, PressableScale, SectionHeader, Tag } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import {
-  EPISODES,
   categoryById,
-  creatorById,
-  episodeById,
   formatCount,
   formatDuration,
   formatMoney,
 } from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
+import { useCreator, useEpisode, useEpisodes } from "@/lib/data";
 
 export default function EpisodeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -44,8 +42,9 @@ export default function EpisodeScreen() {
     toggleLiked,
   } = useApp();
 
-  const episode = episodeById(id ?? "");
-  const creator = creatorById(episode?.creatorId ?? "");
+  const { data: episode, isLoading } = useEpisode(id ?? "");
+  const { data: creator } = useCreator(episode?.creatorId);
+  const { data: allEpisodes = [] } = useEpisodes();
   const unlocked = episode ? canWatch(episode) : false;
 
   const player = useVideoPlayer(
@@ -58,9 +57,17 @@ export default function EpisodeScreen() {
   );
 
   const related = useMemo(
-    () => EPISODES.filter((e) => e.id !== episode?.id && e.category === episode?.category).slice(0, 6),
-    [episode],
+    () => allEpisodes.filter((e) => e.id !== episode?.id && e.category === episode?.category).slice(0, 6),
+    [allEpisodes, episode],
   );
+
+  if (isLoading) {
+    return (
+      <View style={[styles.screen, { alignItems: "center", justifyContent: "center" }]}>
+        <Text style={{ color: Colors.textMid, fontSize: 14, fontWeight: 700 }}>Loading…</Text>
+      </View>
+    );
+  }
 
   if (!episode || !creator) {
     return (

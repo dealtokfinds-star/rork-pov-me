@@ -26,7 +26,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar, Button, Chip, PressableScale, ProgressBar } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { CATEGORIES, CREATORS } from "@/constants/mock-data";
+import { CATEGORIES } from "@/constants/mock-data";
+import { useCreators } from "@/lib/data";
 import { useProfile } from "@/hooks/useProfile";
 import { useApp } from "@/providers/app-provider";
 import type { Creator, PovCategory } from "@/types";
@@ -99,6 +100,8 @@ export default function OnboardingScreen() {
     setStep(clamped);
   };
 
+  const { data: creatorsData = [] } = useCreators();
+
   const toggleCategory = (id: PovCategory): void => {
     setPicked((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
   };
@@ -112,8 +115,8 @@ export default function OnboardingScreen() {
   // Creators recommended for the picked categories; fall back to all if none picked.
   const recommendedCreators: Creator[] =
     picked.length > 0
-      ? CREATORS.filter((c) => c.categories.some((cat) => picked.includes(cat)))
-      : CREATORS;
+      ? creatorsData.filter((c) => c.categories.some((cat) => picked.includes(cat)))
+      : creatorsData;
 
   const finish = async (): Promise<void> => {
     setFinishing(true);

@@ -16,7 +16,7 @@ import {
   SectionHeader,
 } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { CATEGORIES, CREATORS, formatMoney } from "@/constants/mock-data";
+import { CATEGORIES, formatMoney } from "@/constants/mock-data";
 import { useCreators, useEpisodes, useStreams } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
 import type { Episode, PovCategory } from "@/types";
@@ -36,7 +36,7 @@ export default function FeedScreen() {
 
   const liveNow = useMemo(() => (streamsData ?? []).filter((s) => s.viewers > 0), [streamsData]);
   const allEpisodes = episodesData ?? [];
-  const allCreators = creatorsData ?? CREATORS;
+  const allCreators = creatorsData ?? [];
 
   const episodes = useMemo<Episode[]>(() => {
     const subIds = new Set(activeSubs.map((s) => s.creatorId));

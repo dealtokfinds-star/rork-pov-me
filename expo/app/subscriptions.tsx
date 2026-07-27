@@ -5,8 +5,10 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Avatar, Button, EmptyState, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { creatorById, formatMoney } from "@/constants/mock-data";
+import { formatMoney } from "@/constants/mock-data";
+import { useCreator } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
+import type { Subscription } from "@/types";
 
 export default function SubscriptionsScreen() {
   const router = useRouter();
@@ -46,59 +48,16 @@ export default function SubscriptionsScreen() {
         <>
           <Text style={styles.kicker}>Active</Text>
           <View style={{ gap: 10 }}>
-            {active.map((sub) => {
-              const creator = creatorById(sub.creatorId);
-              if (!creator) return null;
-              return (
-                <View key={sub.creatorId} style={styles.card}>
-                  <PressableScale onPress={() => router.push(`/creator/${creator.id}`)} scaleTo={0.98}>
-                    <View style={styles.cardHead}>
-                      <Avatar uri={creator.avatar} size={44} ring live={creator.isLive} />
-                      <View style={{ flex: 1, marginLeft: 11 }}>
-                        <Text style={styles.name}>{creator.name}</Text>
-                        <Text style={styles.identity}>{creator.identity}</Text>
-                      </View>
-                      <Tag label={`${formatMoney(sub.price)}/mo`} color={Colors.ink} bg={Colors.lime} />
-                    </View>
-                  </PressableScale>
-                  <View style={styles.metaRow}>
-                    <Text style={styles.metaText}>
-                      Renews{" "}
-                      {new Date(sub.renewsAt).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
-                    </Text>
-                    <Text style={styles.metaText}>
-                      Creator gets {formatMoney(sub.price * 0.8)}
-                    </Text>
-                  </View>
-                  <View style={styles.actions}>
-                    <Button
-                      label="Send a tip"
-                      variant="dark"
-                      small
-                      onPress={() => router.push(`/tip/${creator.id}`)}
-                      style={{ flex: 1 }}
-                    />
-                    <PressableScale
-                      onPress={() => {
-                        cancelSubscription(creator.id);
-                        haptic("medium");
-                      }}
-                      scaleTo={0.95}
-                      style={{ flex: 1 }}
-                    >
-                      <View style={styles.cancelBtn}>
-                        <XCircle size={14} color={Colors.danger} />
-                        <Text style={styles.cancelText}>Cancel</Text>
-                      </View>
-                    </PressableScale>
-                  </View>
-                </View>
-              );
-            })}
+            {active.map((sub) => (
+              <SubCard
+                key={sub.creatorId}
+                sub={sub}
+                active
+                onCancel={() => { cancelSubscription(sub.creatorId); haptic("medium"); }}
+                onTip={() => router.push(`/tip/${sub.creatorId}`)}
+                onOpen={() => router.push(`/creator/${sub.creatorId}`)}
+              />
+            ))}
           </View>
         </>
       ) : null}
@@ -107,33 +66,15 @@ export default function SubscriptionsScreen() {
         <>
           <Text style={styles.kicker}>Cancelled</Text>
           <View style={{ gap: 10 }}>
-            {cancelled.map((sub) => {
-              const creator = creatorById(sub.creatorId);
-              if (!creator) return null;
-              return (
-                <View key={sub.creatorId} style={[styles.card, { opacity: 0.75 }]}>
-                  <View style={styles.cardHead}>
-                    <Avatar uri={creator.avatar} size={40} />
-                    <View style={{ flex: 1, marginLeft: 11 }}>
-                      <Text style={styles.name}>{creator.name}</Text>
-                      <Text style={styles.identity}>
-                        Access ended · {formatMoney(sub.price)}/mo
-                      </Text>
-                    </View>
-                  </View>
-                  <Button
-                    label="Resume subscription"
-                    small
-                    icon={<RotateCcw size={13} color={Colors.ink} />}
-                    onPress={() => {
-                      resumeSubscription(creator.id);
-                      haptic("success");
-                    }}
-                    style={{ marginTop: 12 }}
-                  />
-                </View>
-              );
-            })}
+            {cancelled.map((sub) => (
+              <SubCard
+                key={sub.creatorId}
+                sub={sub}
+                active={false}
+                onResume={() => { resumeSubscription(sub.creatorId); haptic("success"); }}
+                onOpen={() => router.push(`/creator/${sub.creatorId}`)}
+              />
+            ))}
           </View>
         </>
       ) : null}
@@ -143,6 +84,87 @@ export default function SubscriptionsScreen() {
         unlocks you already bought stay yours forever.
       </Text>
     </ScrollView>
+  );
+}
+
+function SubCard({
+  sub,
+  active,
+  onCancel,
+  onResume,
+  onTip,
+  onOpen,
+}: {
+  sub: Subscription;
+  active: boolean;
+  onCancel?: () => void;
+  onResume?: () => void;
+  onTip?: () => void;
+  onOpen: () => void;
+}) {
+  const { data: creator } = useCreator(sub.creatorId);
+  if (!creator) return null;
+  return (
+    <View style={[styles.card, !active && { opacity: 0.75 }]}>
+      <PressableScale onPress={onOpen} scaleTo={0.98}>
+        <View style={styles.cardHead}>
+          <Avatar uri={creator.avatar} size={active ? 44 : 40} ring live={creator.isLive} />
+          <View style={{ flex: 1, marginLeft: 11 }}>
+            <Text style={styles.name}>{creator.name}</Text>
+            <Text style={styles.identity}>
+              {active ? creator.identity : `Access ended · ${formatMoney(sub.price)}/mo`}
+            </Text>
+          </View>
+          {active ? (
+            <Tag label={`${formatMoney(sub.price)}/mo`} color={Colors.ink} bg={Colors.lime} />
+          ) : null}
+        </View>
+      </PressableScale>
+      {active ? (
+        <>
+          <View style={styles.metaRow}>
+            <Text style={styles.metaText}>
+              Renews{" "}
+              {new Date(sub.renewsAt).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}
+            </Text>
+            <Text style={styles.metaText}>
+              Creator gets {formatMoney(sub.price * 0.8)}
+            </Text>
+          </View>
+          <View style={styles.actions}>
+            <Button
+              label="Send a tip"
+              variant="dark"
+              small
+              onPress={onTip ?? (() => {})}
+              style={{ flex: 1 }}
+            />
+            <PressableScale
+              onPress={onCancel}
+              scaleTo={0.95}
+              style={{ flex: 1 }}
+            >
+              <View style={styles.cancelBtn}>
+                <XCircle size={14} color={Colors.danger} />
+                <Text style={styles.cancelText}>Cancel</Text>
+              </View>
+            </PressableScale>
+          </View>
+        </>
+      ) : (
+        <Button
+          label="Resume subscription"
+          small
+          icon={<RotateCcw size={13} color={Colors.ink} />}
+          onPress={onResume ?? (() => {})}
+          style={{ marginTop: 12 }}
+        />
+      )}
+    </View>
   );
 }
 

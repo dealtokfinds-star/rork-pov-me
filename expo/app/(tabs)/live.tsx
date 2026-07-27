@@ -2,7 +2,7 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { Calendar, Radio, Scissors, Users } from "lucide-react-native";
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -11,28 +11,16 @@ import { Avatar, Button, Chip, LiveBadge, PressableScale, SectionHeader, Tag } f
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import {
   CATEGORIES,
-  CREATORS,
   categoryById,
-  creatorById,
   formatCount,
   formatMoney,
 } from "@/constants/mock-data";
 import { useCreators, useStreams } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
-import type { PovCategory } from "@/types";
+import type { Creator, PovCategory } from "@/types";
 
-const SCHEDULED = [
-  { id: "sc1", creatorId: "c3", title: "Sunday slate: model reveal + live sweat", when: "Sun 12:00", access: "Subs only" },
-  { id: "sc2", creatorId: "c6", title: "Fight week: open workout POV", when: "Wed 19:30", access: "PPV $7.99" },
-  { id: "sc3", creatorId: "c5", title: "Demo day rehearsal, unfiltered", when: "Thu 09:00", access: "Open" },
-];
-
-const CLIPS = [
-  { id: "cl1", creatorId: "c4", label: "Tunnel pull at 240", views: 412000 },
-  { id: "cl2", creatorId: "c1", label: "+$8,200 in 90 seconds", views: 288000 },
-  { id: "cl3", creatorId: "c2", label: "Booth handoff at 3AM", views: 197000 },
-  { id: "cl4", creatorId: "c6", label: "Walkout reaction", views: 733000 },
-];
+const SCHEDULED: never[] = [];
+const CLIPS: never[] = [];
 
 export default function LiveScreen() {
   const insets = useSafeAreaInsets();
@@ -42,7 +30,13 @@ export default function LiveScreen() {
   const { data: streamsData } = useStreams();
   const { data: creatorsData } = useCreators();
   const allStreams = streamsData ?? [];
-  const allCreators = creatorsData ?? CREATORS;
+  const allCreators = creatorsData ?? [];
+  const creatorsById = useMemo(() => {
+    const map = new Map<string, Creator>();
+    allCreators.forEach((c) => map.set(c.id, c));
+    return map;
+  }, [allCreators]);
+  const getCreator = useCallback((cid: string) => creatorsById.get(cid), [creatorsById]);
 
   const streams = useMemo(
     () => (category === "all" ? allStreams : allStreams.filter((s) => s.category === category)),
@@ -95,11 +89,11 @@ export default function LiveScreen() {
             </View>
             <View style={styles.featuredBody}>
               <View style={styles.rowCenter}>
-                <Avatar uri={creatorById(featured.creatorId)?.avatar ?? ""} size={38} ring live />
+                <Avatar uri={getCreator(featured.creatorId)?.avatar ?? ""} size={38} ring live />
                 <View style={{ marginLeft: 10 }}>
-                  <Text style={styles.featuredName}>{creatorById(featured.creatorId)?.name}</Text>
+                  <Text style={styles.featuredName}>{getCreator(featured.creatorId)?.name ?? "Creator"}</Text>
                   <Text style={styles.featuredIdentity}>
-                    {categoryById(featured.category).emoji} {creatorById(featured.creatorId)?.identity}
+                    {categoryById(featured.category).emoji} {getCreator(featured.creatorId)?.identity ?? ""}
                   </Text>
                 </View>
               </View>
@@ -141,9 +135,10 @@ export default function LiveScreen() {
       <SectionHeader kicker="Fan-made" title="Top clips" action="Clip guide" onAction={() => router.push("/guidelines")} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
         {CLIPS.map((clip) => {
-          const creator = creatorById(clip.creatorId);
+          const c = clip as unknown as { id: string; creatorId: string; label: string; views: number };
+          const creator = getCreator(c.creatorId);
           return (
-            <PressableScale key={clip.id} scaleTo={0.96} onPress={() => router.push(`/creator/${clip.creatorId}`)}>
+            <PressableScale key={c.id} scaleTo={0.96} onPress={() => router.push(`/creator/${c.creatorId}`)}>
               <View style={styles.clip}>
                 <Image source={{ uri: creator?.cover ?? "" }} style={StyleSheet.absoluteFill} contentFit="cover" />
                 <LinearGradient colors={["transparent", "rgba(8,8,10,0.95)"]} style={StyleSheet.absoluteFill} />
@@ -153,11 +148,11 @@ export default function LiveScreen() {
                 </View>
                 <View style={styles.clipBody}>
                   <Text style={styles.clipLabel} numberOfLines={2}>
-                    {clip.label}
+                    {c.label}
                   </Text>
                   <View style={styles.rowGap4}>
                     <Users size={10} color={Colors.textDim} />
-                    <Text style={styles.clipViews}>{formatCount(clip.views)}</Text>
+                    <Text style={styles.clipViews}>{formatCount(c.views)}</Text>
                   </View>
                 </View>
               </View>
@@ -169,20 +164,21 @@ export default function LiveScreen() {
       <SectionHeader kicker="Set a reminder" title="Scheduled POVs" />
       <View style={styles.schedWrap}>
         {SCHEDULED.map((item) => {
-          const creator = creatorById(item.creatorId);
+          const s = item as unknown as { id: string; creatorId: string; title: string; when: string; access: string };
+          const creator = getCreator(s.creatorId);
           return (
-            <PressableScale key={item.id} scaleTo={0.98} onPress={() => router.push(`/creator/${item.creatorId}`)}>
+            <PressableScale key={s.id} scaleTo={0.98} onPress={() => router.push(`/creator/${s.creatorId}`)}>
               <View style={styles.schedRow}>
                 <View style={styles.schedWhen}>
                   <Calendar size={13} color={Colors.lime} />
-                  <Text style={styles.schedWhenText}>{item.when}</Text>
+                  <Text style={styles.schedWhenText}>{s.when}</Text>
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.schedTitle} numberOfLines={1}>
-                    {item.title}
+                    {s.title}
                   </Text>
                   <Text style={styles.schedSub}>
-                    @{creator?.handle} · {item.access}
+                    @{creator?.handle ?? "creator"} · {s.access}
                   </Text>
                 </View>
               </View>

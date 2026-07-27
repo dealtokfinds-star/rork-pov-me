@@ -5,7 +5,7 @@ import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { Avatar, Button, PressableScale, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { GIFTS, creatorById, formatMoney } from "@/constants/mock-data";
+import { GIFTS, formatMoney } from "@/constants/mock-data";
 import { useCreator } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
 
@@ -22,10 +22,14 @@ export default function TipScreen() {
   const [sent, setSent] = useState<number | null>(null);
   const [processing, setProcessing] = useState<boolean>(false);
 
-  // Try real Supabase creator first, fall back to mock
-  const { data: realCreator } = useCreator(id);
-  const mockCreator = creatorById(id ?? "");
-  const creator = realCreator ?? mockCreator;
+  const { data: creator, isLoading } = useCreator(id);
+  if (isLoading) {
+    return (
+      <View style={styles.screen}>
+        <Text style={styles.title}>Loading…</Text>
+      </View>
+    );
+  }
   if (!creator) {
     return (
       <View style={styles.screen}>

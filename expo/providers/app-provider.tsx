@@ -2,7 +2,6 @@ import createContextHook from "@nkzw/create-context-hook";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { CREATORS, EPISODES, STUDIO_EPISODES } from "@/constants/mock-data";
 import { openCheckout, cancelSubscription as cancelStripeSub } from "@/lib/payments";
 import { supabase } from "@/lib/supabase";
 import type {
@@ -51,7 +50,7 @@ const DEFAULT_STATE: PersistedState = {
   followedCreators: [],
   transactions: [],
   tipTotals: {},
-  studio: STUDIO_EPISODES,
+  studio: [],
   interests: [],
   creatorPrice: 12.99,
   payoutConnected: false,
@@ -158,8 +157,7 @@ export const [AppProvider, useApp] = createContextHook(() => {
           },
         ],
       }));
-      const name = CREATORS.find((c) => c.id === creatorId)?.handle ?? "creator";
-      pushTransaction({ kind: "sub", label: `Subscription · @${name}`, amount: price, creatorId });
+      pushTransaction({ kind: "sub", label: `Subscription · creator ${creatorId.slice(0, 6)}`, amount: price, creatorId });
       return true;
     },
     [state.balance, charge, pushTransaction],
@@ -191,12 +189,10 @@ export const [AppProvider, useApp] = createContextHook(() => {
         ...prev,
         unlockedEpisodes: [...new Set([...prev.unlockedEpisodes, episodeId])],
       }));
-      const ep = EPISODES.find((e) => e.id === episodeId);
       pushTransaction({
         kind: "ppv",
-        label: `Unlocked · ${ep?.title ?? "POV episode"}`,
+        label: `Unlocked · episode ${episodeId.slice(0, 6)}`,
         amount: price,
-        creatorId: ep?.creatorId,
       });
       return true;
     },
@@ -228,10 +224,9 @@ export const [AppProvider, useApp] = createContextHook(() => {
           [creatorId]: Math.round(((prev.tipTotals[creatorId] ?? 0) + amount) * 100) / 100,
         },
       }));
-      const name = CREATORS.find((c) => c.id === creatorId)?.handle ?? "creator";
       pushTransaction({
         kind: label ? "gift" : "tip",
-        label: label ? `${label} · @${name}` : `Tip · @${name}`,
+        label: label ? `${label} · creator ${creatorId.slice(0, 6)}` : `Tip · creator ${creatorId.slice(0, 6)}`,
         amount,
         creatorId,
       });
@@ -558,10 +553,10 @@ export const [AppProvider, useApp] = createContextHook(() => {
 });
 
 /** Episodes from creators the user actively subscribes to, newest first. */
-export function useSubscribedFeed(): Episode[] {
+export function useSubscribedFeed(episodes: Episode[]): Episode[] {
   const { activeSubs } = useApp();
   return useMemo(() => {
     const ids = new Set(activeSubs.map((s) => s.creatorId));
-    return EPISODES.filter((e) => ids.has(e.creatorId));
-  }, [activeSubs]);
+    return episodes.filter((e) => ids.has(e.creatorId));
+  }, [activeSubs, episodes]);
 }

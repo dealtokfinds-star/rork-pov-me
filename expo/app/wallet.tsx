@@ -15,7 +15,8 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-nat
 
 import { Button, PressableScale, SectionHeader, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { creatorById, formatMoney } from "@/constants/mock-data";
+import { formatMoney } from "@/constants/mock-data";
+import { useCreator } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
 import type { Transaction } from "@/types";
 
@@ -159,7 +160,7 @@ function MethodRow({
 
 function TxRow({ tx }: { tx: Transaction }) {
   const inbound = tx.kind === "topup";
-  const creator = tx.creatorId ? creatorById(tx.creatorId) : undefined;
+  const { data: creator } = useCreator(tx.creatorId ?? "");
   const icon = inbound ? (
     <ArrowDownLeft size={15} color={Colors.success} />
   ) : tx.kind === "tip" || tx.kind === "gift" ? (

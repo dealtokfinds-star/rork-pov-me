@@ -9,8 +9,6 @@ import { Avatar, Button, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import {
   categoryById,
-  creatorById,
-  episodeById,
   formatDuration,
   formatMoney,
 } from "@/constants/mock-data";
@@ -24,14 +22,16 @@ export default function UnlockScreen() {
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<boolean>(false);
 
-  // Try real Supabase episode/creator first, fall back to mock
-  const { data: realEpisode } = useEpisode(id);
-  const mockEpisode = episodeById(id ?? "");
-  const episode = realEpisode ?? mockEpisode;
-  const { data: realCreator } = useCreator(episode?.creatorId);
-  const mockCreator = creatorById(episode?.creatorId ?? "");
-  const creator = realCreator ?? mockCreator;
+  const { data: episode, isLoading } = useEpisode(id);
+  const { data: creator } = useCreator(episode?.creatorId);
 
+  if (isLoading) {
+    return (
+      <View style={styles.screen}>
+        <Text style={styles.title}>Loading…</Text>
+      </View>
+    );
+  }
   if (!episode || !creator) {
     return (
       <View style={styles.screen}>

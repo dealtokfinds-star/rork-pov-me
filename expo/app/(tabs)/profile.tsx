@@ -22,9 +22,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EpisodeTile } from "@/components/cards";
 import { Avatar, Button, PressableScale, SectionHeader, StatTile, Tag } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { CREATORS, EPISODES, creatorById, formatMoney } from "@/constants/mock-data";
+import { formatMoney } from "@/constants/mock-data";
 import { useAuth } from "@/hooks/useAuth";
-import { useCreators, useEpisodes } from "@/lib/data";
+import { useCreators, useEpisodes, useCreator } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
 
 export default function ProfileScreen() {
@@ -45,8 +45,8 @@ export default function ProfileScreen() {
     resetAccount,
   } = useApp();
 
-  const { data: creatorsData = CREATORS } = useCreators();
-  const { data: episodesData = EPISODES } = useEpisodes();
+  const { data: creatorsData = [] } = useCreators();
+  const { data: episodesData = [] } = useEpisodes();
 
   const profileName = user?.name ?? displayName;
   const profileHandle = user?.email?.split("@")[0] ?? handle;
@@ -125,28 +125,9 @@ export default function ProfileScreen() {
         </View>
       ) : (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
-          {activeSubs.map((sub) => {
-            const creator = creatorById(sub.creatorId);
-            if (!creator) return null;
-            return (
-              <PressableScale
-                key={sub.creatorId}
-                scaleTo={0.95}
-                onPress={() => router.push(`/creator/${sub.creatorId}`)}
-              >
-                <View style={styles.subCard}>
-                  <Avatar uri={creator.avatar} size={52} ring live={creator.isLive} />
-                  <Text style={styles.subName} numberOfLines={1}>
-                    {creator.name}
-                  </Text>
-                  <Text style={styles.subMeta}>{formatMoney(sub.price)}/mo</Text>
-                  <Text style={styles.subRenew}>
-                    Renews {new Date(sub.renewsAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                  </Text>
-                </View>
-              </PressableScale>
-            );
-          })}
+          {activeSubs.map((sub) => (
+            <SubCard key={sub.creatorId} creatorId={sub.creatorId} price={sub.price} renewsAt={sub.renewsAt} />
+          ))}
         </ScrollView>
       )}
 
@@ -194,7 +175,7 @@ export default function ProfileScreen() {
       </PressableScale>
 
       <Text style={styles.footer}>
-        povme · {creatorsData.length} verified creators · 18+ platform · 80/20 creator split
+        povme · {creatorsData.length} creators · 18+ platform · 80/20 creator split
       </Text>
     </ScrollView>
   );
@@ -215,6 +196,29 @@ function MenuRow({
         <View style={styles.menuIcon}>{icon}</View>
         <Text style={styles.menuLabel}>{label}</Text>
         <ChevronRight size={17} color={Colors.textDim} />
+      </View>
+    </PressableScale>
+  );
+}
+
+function SubCard({ creatorId, price, renewsAt }: { creatorId: string; price: number; renewsAt: number }) {
+  const router = useRouter();
+  const { data: creator } = useCreator(creatorId);
+  if (!creator) return null;
+  return (
+    <PressableScale
+      scaleTo={0.95}
+      onPress={() => router.push(`/creator/${creator.id}`)}
+    >
+      <View style={styles.subCard}>
+        <Avatar uri={creator.avatar} size={52} ring live={creator.isLive} />
+        <Text style={styles.subName} numberOfLines={1}>
+          {creator.name}
+        </Text>
+        <Text style={styles.subMeta}>{formatMoney(price)}/mo</Text>
+        <Text style={styles.subRenew}>
+          Renews {new Date(renewsAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+        </Text>
       </View>
     </PressableScale>
   );

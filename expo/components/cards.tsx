@@ -17,11 +17,11 @@ import { StyleSheet, Text, View } from "react-native";
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import {
   categoryById,
-  creatorById,
   formatCount,
   formatDuration,
   formatMoney,
 } from "@/constants/mock-data";
+import { useCreator } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
 import type { Creator, Episode, LiveStream } from "@/types";
 import { Avatar, LiveBadge, PressableScale, Tag } from "@/components/ui";
@@ -46,7 +46,7 @@ export function AccessTag({ episode }: { episode: Episode }) {
 export function EpisodeCard({ episode }: { episode: Episode }) {
   const router = useRouter();
   const { canWatch, toggleSaved, savedEpisodes, likedEpisodes, toggleLiked } = useApp();
-  const creator = creatorById(episode.creatorId);
+  const { data: creator } = useCreator(episode.creatorId);
   const locked = !canWatch(episode);
   const cat = categoryById(episode.category);
   const saved = savedEpisodes.includes(episode.id);
@@ -184,7 +184,7 @@ export function EpisodeTile({ episode, width = 190 }: { episode: Episode; width?
   const router = useRouter();
   const { canWatch } = useApp();
   const locked = !canWatch(episode);
-  const creator = creatorById(episode.creatorId);
+  const { data: creator } = useCreator(episode.creatorId);
 
   return (
     <PressableScale scaleTo={0.96} onPress={() => router.push(`/episode/${episode.id}`)}>
@@ -232,7 +232,7 @@ export function EpisodeTile({ episode, width = 190 }: { episode: Episode; width?
 
 export function LiveStreamCard({ stream, wide }: { stream: LiveStream; wide?: boolean }) {
   const router = useRouter();
-  const creator = creatorById(stream.creatorId);
+  const { data: creator } = useCreator(stream.creatorId);
   const cat = categoryById(stream.category);
   const accessLabel = useMemo(() => {
     if (stream.access === "public") return "Open";
