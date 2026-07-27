@@ -7,6 +7,7 @@ import type {
   Episode,
   LiveStream,
   PovCategory,
+  StudioEpisode,
   StreamAccess,
 } from "@/types";
 
@@ -289,6 +290,70 @@ export function useCreatorEpisodes(creatorId: string | undefined) {
     queryKey: ["creator-episodes", creatorId],
     queryFn: () => fetchEpisodesByCreator(creatorId!),
     enabled: !!creatorId,
+  });
+}
+
+type StudioEpisodeRow = {
+  id: string;
+  title: string;
+  thumb_url: string | null;
+  video_url: string | null;
+  access: string;
+  ppv_price: number | null;
+  category: string;
+  chapter: string | null;
+  status: string;
+  views: number | null;
+  likes: number | null;
+  tips: number | null;
+  posted_at: string | null;
+  scheduled_at: string | null;
+  mux_upload_id: string | null;
+  mux_asset_id: string | null;
+};
+
+function mapStudioEpisode(row: StudioEpisodeRow): StudioEpisode {
+  const isProcessing = row.status === "uploading" || row.status === "transcoding";
+  const postedAt =
+    row.status === "published" ? relTime(row.posted_at)
+    : row.status === "scheduled" ? (row.scheduled_at ? relTime(row.scheduled_at) : "queued")
+    : "—";
+  return {
+    id: row.id,
+    title: row.title,
+    thumb: row.thumb_url ?? "",
+    access: row.access as AccessLevel,
+    ppvPrice: row.ppv_price ?? undefined,
+    status: isProcessing ? "draft" : (row.status as "published" | "scheduled" | "draft"),
+    views: row.views ?? 0,
+    earned: Number(row.tips ?? 0) + Number(row.views ?? 0) * 0,
+    category: row.category as PovCategory,
+    postedAt,
+  };
+}
+
+async function fetchStudioEpisodes(creatorId: string): Promise<StudioEpisode[]> {
+  const { data, error } = await supabase
+    .from("episodes")
+    .select(
+      "id, title, thumb_url, video_url, access, ppv_price, category, chapter, status, views, likes, tips, posted_at, scheduled_at, mux_upload_id, mux_asset_id",
+    )
+    .eq("creator_id", creatorId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("[povme] fetchStudioEpisodes:", error.message);
+    throw error;
+  }
+  return (data ?? []).map((r) => mapStudioEpisode(r as StudioEpisodeRow));
+}
+
+export function useStudioEpisodes(creatorId: string | null | undefined) {
+  return useQuery<StudioEpisode[]>({
+    queryKey: ["studio-episodes", creatorId],
+    queryFn: () => fetchStudioEpisodes(creatorId!),
+    enabled: !!creatorId,
+    staleTime: 15_000,
   });
 }
 

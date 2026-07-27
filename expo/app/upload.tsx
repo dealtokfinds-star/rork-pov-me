@@ -29,12 +29,7 @@ import { Button, Chip, PressableScale, ProgressBar, haptic } from "@/components/
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import { CATEGORIES, formatMoney } from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
-import {
-  awaitAssetReady,
-  createUploadUrl,
-  updateEpisodePublish,
-  uploadFile,
-} from "@/lib/muxUpload";
+import { awaitAssetReady, createUploadUrl, uploadFile } from "@/lib/muxUpload";
 import type { AccessLevel, PovCategory } from "@/types";
 
 const CHAPTERS = ["Morning", "Work", "Gym", "Night out", "Travel day", "Debrief"];
@@ -202,25 +197,22 @@ export default function UploadScreen() {
       setSubmitting(true);
       haptic("success");
       try {
-        // Update the real episodes row with the publish metadata.
-        if (episodeId) {
-          await updateEpisodePublish(episodeId, {
-            status,
-            access,
-            ppvPrice: access === "ppv" ? ppvPrice : null,
-            category,
-            title: title.trim().length > 0 ? title.trim() : "Untitled POV episode",
-            thumbUrl: thumb ?? undefined,
-          });
-        }
-        // Also update the local studio list for immediate UI feedback.
-        publishEpisode({
-          title: title.trim().length > 0 ? title.trim() : "Untitled POV episode",
-          thumb: thumb ?? "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=600&q=80",
+        const finalTitle = title.trim().length > 0 ? title.trim() : "Untitled POV episode";
+        const fallbackThumb =
+          "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=600&q=80";
+
+        // publishEpisode now writes the real episodes row (when episodeId is
+        // present) AND optimistically updates the local studio list.
+        await publishEpisode({
+          episodeId: episodeId ?? undefined,
+          title: finalTitle,
+          thumb: thumb ?? fallbackThumb,
           access,
           ppvPrice: access === "ppv" ? ppvPrice : undefined,
           category,
           status,
+          description: description.trim().length > 0 ? description.trim() : undefined,
+          chapter,
         });
         setPublished(status);
       } catch (err) {
@@ -231,7 +223,7 @@ export default function UploadScreen() {
         setSubmitting(false);
       }
     },
-    [episodeId, access, ppvPrice, category, title, thumb, publishEpisode],
+    [episodeId, access, ppvPrice, category, title, thumb, description, chapter, publishEpisode],
   );
 
   // ---- Success screen ----

@@ -23,6 +23,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Chip, EmptyState, PressableScale, ProgressBar, SectionHeader, StatTile, Tag } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import { formatCount, formatMoney } from "@/constants/mock-data";
+import { useStudioEpisodes } from "@/lib/data";
+import { useAuth } from "@/hooks/useAuth";
 import { useApp } from "@/providers/app-provider";
 import type { StudioEpisode } from "@/types";
 
@@ -31,8 +33,22 @@ type Filter = "all" | "published" | "scheduled" | "draft";
 export default function StudioScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { isCreator, studio, creatorStats, creatorPrice, deleteStudioEpisode, displayName } = useApp();
+  const { isCreator, studio: localStudio, creatorStats, creatorPrice, deleteStudioEpisode, displayName } = useApp();
+  const { user } = useAuth();
+  const { data: dbEpisodes } = useStudioEpisodes(user?.id ?? null);
   const [filter, setFilter] = useState<Filter>("all");
+
+  // Merge real DB episodes with any optimistic local entries. DB wins on id
+  // collision so a just-published episode shows its real status/thumbnail.
+  const studio = useMemo<StudioEpisode[]>(() => {
+    if (!dbEpisodes || dbEpisodes.length === 0) return localStudio;
+    const localById = new Map(localStudio.map((e) => [e.id, e]));
+    const merged: StudioEpisode[] = [...dbEpisodes];
+    for (const [id, ep] of localById) {
+      if (!dbEpisodes.some((d) => d.id === id)) merged.push(ep);
+    }
+    return merged;
+  }, [dbEpisodes, localStudio]);
 
   const list = useMemo<StudioEpisode[]>(
     () => (filter === "all" ? studio : studio.filter((e) => e.status === filter)),

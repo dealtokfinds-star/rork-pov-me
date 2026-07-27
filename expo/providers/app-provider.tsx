@@ -424,19 +424,55 @@ export const [AppProvider, useApp] = createContextHook(() => {
   }, []);
 
   const publishEpisode = useCallback(
-    (input: {
+    async (input: {
       title: string;
       thumb: string;
       access: AccessLevel;
       ppvPrice?: number;
       category: PovCategory;
       status: "published" | "scheduled" | "draft";
-    }) => {
+      /** Real episodes row id (from create-upload-url). When provided, the
+       *  publish metadata is written to the `episodes` table via supabase.
+       *  Falls back to local-only when absent (e.g. not signed in). */
+      episodeId?: string;
+      description?: string;
+      chapter?: string;
+      scheduledAt?: string | null;
+    }): Promise<void> => {
+      // 1. Real DB write — update the placeholder row with publish metadata.
+      if (input.episodeId) {
+        const update: Record<string, unknown> = {
+          status: input.status,
+          access: input.access,
+          ppv_price: input.access === "ppv" ? (input.ppvPrice ?? null) : null,
+          category: input.category,
+          title: input.title.trim().slice(0, 120),
+        };
+        if (input.thumb) update.thumb_url = input.thumb;
+        if (input.description) update.description = input.description.trim().slice(0, 500);
+        if (input.chapter) update.chapter = input.chapter;
+        if (input.status === "published") update.posted_at = new Date().toISOString();
+        if (input.status === "scheduled") update.scheduled_at = input.scheduledAt ?? null;
+
+        try {
+          const { error } = await supabase
+            .from("episodes")
+            .update(update)
+            .eq("id", input.episodeId);
+          if (error) {
+            console.log("[povme] publishEpisode DB update failed", error.message);
+          }
+        } catch (err) {
+          console.log("[povme] publishEpisode DB update threw", err);
+        }
+      }
+
+      // 2. Optimistic local update for immediate UI feedback.
       setState((prev) => ({
         ...prev,
         studio: [
           {
-            id: uid("s"),
+            id: input.episodeId ?? uid("s"),
             title: input.title,
             thumb: input.thumb,
             access: input.access,
@@ -447,7 +483,7 @@ export const [AppProvider, useApp] = createContextHook(() => {
             category: input.category,
             postedAt: input.status === "published" ? "now" : input.status === "scheduled" ? "queued" : "—",
           },
-          ...prev.studio,
+          ...prev.studio.filter((e) => e.id !== input.episodeId),
         ],
       }));
     },
