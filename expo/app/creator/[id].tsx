@@ -18,11 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EpisodeCard, EpisodeTile, LiveStreamCard } from "@/components/cards";
 import { Avatar, Button, Chip, PressableScale, SectionHeader, Tag } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import {
-  categoryById,
-  formatCount,
-  formatMoney,
-} from "@/constants/mock-data";
+import { categoryById, formatCount, formatMoney } from "@/lib/format";
 import { useCreator, useCreatorEpisodes, useStreams } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
 

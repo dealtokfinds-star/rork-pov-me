@@ -7,9 +7,9 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Avatar, Button, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { creatorById, episodesByCreator, formatCount, formatMoney } from "@/constants/mock-data";
+import { formatCount, formatMoney } from "@/lib/format";
 import { useApp } from "@/providers/app-provider";
-import { useCreator } from "@/lib/data";
+import { useCreator, useCreatorEpisodes } from "@/lib/data";
 
 interface Tier {
   id: string;
@@ -52,16 +52,14 @@ const TIERS: Tier[] = [
 export default function SubscribeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { subscribe, subscribeViaStripe, balance, isSubscribed } = useApp();
+  const { subscribeViaStripe, balance, isSubscribed } = useApp();
   const [tierId, setTierId] = useState<string>("basic");
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<boolean>(false);
   const [processing, setProcessing] = useState<boolean>(false);
 
-  // Try real Supabase creator first, fall back to mock
-  const { data: realCreator } = useCreator(id);
-  const mockCreator = creatorById(id ?? "");
-  const creator = realCreator ?? mockCreator;
+  const { data: creator } = useCreator(id);
+  const { data: episodes = [] } = useCreatorEpisodes(id);
   if (!creator) {
     return (
       <View style={styles.screen}>
@@ -72,37 +70,21 @@ export default function SubscribeScreen() {
 
   const tier = TIERS.find((t) => t.id === tierId) ?? TIERS[0];
   const price = Math.round(creator.subPrice * tier.multiplier * 100) / 100;
-  const episodes = episodesByCreator(creator.id);
   const already = isSubscribed(creator.id);
 
   const confirm = async (): Promise<void> => {
     setProcessing(true);
     setError(null);
     try {
-      // Try real Stripe subscription first
       const result = await subscribeViaStripe(creator.id, price);
       if (result.success) {
         setDone(true);
         haptic("success");
         return;
       }
-      // Fallback to wallet-based mock if Stripe fails
-      const ok = subscribe(creator.id, price);
-      if (!ok) {
-        setError(result.error ?? `Your wallet has ${formatMoney(balance)}. Add funds to subscribe.`);
-        return;
-      }
-      setDone(true);
-      haptic("success");
+      setError(result.error ?? "Subscription failed. Please try again.");
     } catch (err) {
-      // Fallback to wallet-based mock
-      const ok = subscribe(creator.id, price);
-      if (!ok) {
-        setError(err instanceof Error ? err.message : "Subscription failed");
-      } else {
-        setDone(true);
-        haptic("success");
-      }
+      setError(err instanceof Error ? err.message : "Subscription failed");
     } finally {
       setProcessing(false);
     }

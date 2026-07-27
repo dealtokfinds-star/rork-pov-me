@@ -5,7 +5,7 @@ import { Alert, Linking, ScrollView, StyleSheet, Switch, Text, View } from "reac
 
 import { Button, Chip, PressableScale, SectionHeader, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { formatMoney } from "@/constants/mock-data";
+import { formatMoney } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useProfile";
 import { usePushNotifications } from "@/hooks/usePush";

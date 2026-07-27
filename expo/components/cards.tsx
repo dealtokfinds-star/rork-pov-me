@@ -15,13 +15,8 @@ import React, { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import {
-  categoryById,
-  creatorById,
-  formatCount,
-  formatDuration,
-  formatMoney,
-} from "@/constants/mock-data";
+import { categoryById, formatCount, formatDuration, formatMoney } from "@/lib/format";
+import { useCreatorMap } from "@/hooks/useCreatorMap";
 import { useApp } from "@/providers/app-provider";
 import type { Creator, Episode, LiveStream } from "@/types";
 import { Avatar, LiveBadge, PressableScale, Tag } from "@/components/ui";
@@ -46,7 +41,8 @@ export function AccessTag({ episode }: { episode: Episode }) {
 export function EpisodeCard({ episode }: { episode: Episode }) {
   const router = useRouter();
   const { canWatch, toggleSaved, savedEpisodes, likedEpisodes, toggleLiked } = useApp();
-  const creator = creatorById(episode.creatorId);
+  const { get } = useCreatorMap();
+  const creator = get(episode.creatorId);
   const locked = !canWatch(episode);
   const cat = categoryById(episode.category);
   const saved = savedEpisodes.includes(episode.id);
@@ -183,8 +179,9 @@ export function EpisodeCard({ episode }: { episode: Episode }) {
 export function EpisodeTile({ episode, width = 190 }: { episode: Episode; width?: number }) {
   const router = useRouter();
   const { canWatch } = useApp();
+  const { get } = useCreatorMap();
   const locked = !canWatch(episode);
-  const creator = creatorById(episode.creatorId);
+  const creator = get(episode.creatorId);
 
   return (
     <PressableScale scaleTo={0.96} onPress={() => router.push(`/episode/${episode.id}`)}>
@@ -232,7 +229,8 @@ export function EpisodeTile({ episode, width = 190 }: { episode: Episode; width?
 
 export function LiveStreamCard({ stream, wide }: { stream: LiveStream; wide?: boolean }) {
   const router = useRouter();
-  const creator = creatorById(stream.creatorId);
+  const { get } = useCreatorMap();
+  const creator = get(stream.creatorId);
   const cat = categoryById(stream.category);
   const accessLabel = useMemo(() => {
     if (stream.access === "public") return "Open";
@@ -259,8 +257,8 @@ export function LiveStreamCard({ stream, wide }: { stream: LiveStream; wide?: bo
         </View>
         <View style={styles.liveBottom}>
           <View style={styles.rowCenter}>
-            <Avatar uri={creator?.avatar ?? ""} size={28} ring live />
-            <Text style={styles.liveHandle}>@{creator?.handle}</Text>
+            <Avatar uri={creator?.avatar ?? stream.thumb} size={28} ring live />
+            <Text style={styles.liveHandle}>@{creator?.handle ?? "creator"}</Text>
             <Text style={styles.liveCat}>{cat.emoji}</Text>
           </View>
           <Text style={styles.liveTitle} numberOfLines={2}>

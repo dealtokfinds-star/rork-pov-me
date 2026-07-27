@@ -5,7 +5,7 @@ import { ArrowUpRight, Globe2, Repeat } from "lucide-react-native";
 
 import { Chip, PressableScale, ProgressBar, SectionHeader, StatTile } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { formatCount, formatMoney } from "@/constants/mock-data";
+import { formatCount, formatMoney } from "@/lib/format";
 import { fetchCreatorAnalytics, type CreatorAnalytics } from "@/hooks/useAnalytics";
 
 type Range = "7d" | "30d" | "90d";

@@ -8,7 +8,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import React from "react";
 
 import HostScreen from "@/components/HostScreen";
-import { CATEGORIES } from "@/constants/mock-data";
+import { CATEGORIES } from "@/lib/format";
 import type { PovCategory, StreamAccess } from "@/types";
 
 export default function HostRoute(): React.ReactElement | null {

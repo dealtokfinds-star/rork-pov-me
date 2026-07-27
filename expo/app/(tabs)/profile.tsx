@@ -22,8 +22,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EpisodeTile } from "@/components/cards";
 import { Avatar, Button, PressableScale, SectionHeader, StatTile, Tag } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { CREATORS, EPISODES, creatorById, formatMoney } from "@/constants/mock-data";
+import { formatMoney } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
+import { useCreatorMap } from "@/hooks/useCreatorMap";
 import { useCreators, useEpisodes } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
 
@@ -45,8 +46,9 @@ export default function ProfileScreen() {
     resetAccount,
   } = useApp();
 
-  const { data: creatorsData = CREATORS } = useCreators();
-  const { data: episodesData = EPISODES } = useEpisodes();
+  const { data: creatorsData = [] } = useCreators();
+  const { data: episodesData = [] } = useEpisodes();
+  const { get: getCreator } = useCreatorMap();
 
   const profileName = user?.name ?? displayName;
   const profileHandle = user?.email?.split("@")[0] ?? handle;
@@ -126,7 +128,7 @@ export default function ProfileScreen() {
       ) : (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
           {activeSubs.map((sub) => {
-            const creator = creatorById(sub.creatorId);
+            const creator = getCreator(sub.creatorId);
             if (!creator) return null;
             return (
               <PressableScale

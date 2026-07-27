@@ -5,12 +5,14 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Avatar, Button, EmptyState, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { creatorById, formatMoney } from "@/constants/mock-data";
+import { formatMoney } from "@/lib/format";
+import { useCreatorMap } from "@/hooks/useCreatorMap";
 import { useApp } from "@/providers/app-provider";
 
 export default function SubscriptionsScreen() {
   const router = useRouter();
-  const { subscriptions, cancelSubscription, resumeSubscription, monthlySpend, balance } = useApp();
+  const { subscriptions, cancelSubscriptionViaStripe, monthlySpend, balance } = useApp();
+  const { get: getCreator } = useCreatorMap();
 
   const active = subscriptions.filter((s) => s.active);
   const cancelled = subscriptions.filter((s) => !s.active);
@@ -47,7 +49,7 @@ export default function SubscriptionsScreen() {
           <Text style={styles.kicker}>Active</Text>
           <View style={{ gap: 10 }}>
             {active.map((sub) => {
-              const creator = creatorById(sub.creatorId);
+              const creator = getCreator(sub.creatorId);
               if (!creator) return null;
               return (
                 <View key={sub.creatorId} style={styles.card}>
@@ -84,7 +86,7 @@ export default function SubscriptionsScreen() {
                     />
                     <PressableScale
                       onPress={() => {
-                        cancelSubscription(creator.id);
+                        void cancelSubscriptionViaStripe(creator.id);
                         haptic("medium");
                       }}
                       scaleTo={0.95}
@@ -108,7 +110,7 @@ export default function SubscriptionsScreen() {
           <Text style={styles.kicker}>Cancelled</Text>
           <View style={{ gap: 10 }}>
             {cancelled.map((sub) => {
-              const creator = creatorById(sub.creatorId);
+              const creator = getCreator(sub.creatorId);
               if (!creator) return null;
               return (
                 <View key={sub.creatorId} style={[styles.card, { opacity: 0.75 }]}>
@@ -122,13 +124,10 @@ export default function SubscriptionsScreen() {
                     </View>
                   </View>
                   <Button
-                    label="Resume subscription"
+                    label="Resubscribe"
                     small
                     icon={<RotateCcw size={13} color={Colors.ink} />}
-                    onPress={() => {
-                      resumeSubscription(creator.id);
-                      haptic("success");
-                    }}
+                    onPress={() => router.push(`/subscribe/${creator.id}`)}
                     style={{ marginTop: 12 }}
                   />
                 </View>

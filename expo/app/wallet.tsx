@@ -15,7 +15,8 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-nat
 
 import { Button, PressableScale, SectionHeader, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { creatorById, formatMoney } from "@/constants/mock-data";
+import { formatMoney } from "@/lib/format";
+import { useCreatorMap } from "@/hooks/useCreatorMap";
 import { useApp } from "@/providers/app-provider";
 import type { Transaction } from "@/types";
 
@@ -23,7 +24,8 @@ const TOPUPS = [25, 50, 100, 250];
 
 export default function WalletScreen() {
   const router = useRouter();
-  const { balance, topUp, topUpViaStripe, transactions, monthlySpend, totalSpent, refreshWallet } = useApp();
+  const { balance, topUpViaStripe, transactions, monthlySpend, totalSpent, refreshWallet } = useApp();
+  const { get: getCreator } = useCreatorMap();
   const [processing, setProcessing] = useState<number | null>(null);
   const [payError, setPayError] = useState<string | null>(null);
 
@@ -159,7 +161,8 @@ function MethodRow({
 
 function TxRow({ tx }: { tx: Transaction }) {
   const inbound = tx.kind === "topup";
-  const creator = tx.creatorId ? creatorById(tx.creatorId) : undefined;
+  const { get: getCreator } = useCreatorMap();
+  const creator = tx.creatorId ? getCreator(tx.creatorId) : undefined;
   const icon = inbound ? (
     <ArrowDownLeft size={15} color={Colors.success} />
   ) : tx.kind === "tip" || tx.kind === "gift" ? (

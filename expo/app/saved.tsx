@@ -6,7 +6,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { EpisodeTile } from "@/components/cards";
 import { Chip, EmptyState } from "@/components/ui";
 import Colors, { microLabel } from "@/constants/colors";
-import { EPISODES } from "@/constants/mock-data";
+import { useEpisodes } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
 
 type Filter = "saved" | "unlocked" | "liked";
@@ -14,10 +14,11 @@ type Filter = "saved" | "unlocked" | "liked";
 export default function SavedScreen() {
   const router = useRouter();
   const { savedEpisodes, unlockedEpisodes, likedEpisodes } = useApp();
+  const { data: allEpisodes = [] } = useEpisodes();
   const [filter, setFilter] = useState<Filter>("saved");
 
   const ids = filter === "saved" ? savedEpisodes : filter === "unlocked" ? unlockedEpisodes : likedEpisodes;
-  const list = useMemo(() => EPISODES.filter((e) => ids.includes(e.id)), [ids]);
+  const list = useMemo(() => allEpisodes.filter((e) => ids.includes(e.id)), [ids, allEpisodes]);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>

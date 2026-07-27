@@ -22,7 +22,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button, Chip, EmptyState, PressableScale, ProgressBar, SectionHeader, StatTile, Tag } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { formatCount, formatMoney } from "@/constants/mock-data";
+import { formatCount, formatMoney } from "@/lib/format";
 import { useApp } from "@/providers/app-provider";
 import type { StudioEpisode } from "@/types";
 

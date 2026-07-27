@@ -41,12 +41,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChatOverlay, type ChatOverlayHandle } from "@/components/ChatOverlay";
 import { Avatar, Button, LiveBadge, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius } from "@/constants/colors";
-import {
-  creatorById,
-  formatCount,
-  formatMoney,
-  streamById,
-} from "@/constants/mock-data";
+import { formatCount, formatMoney } from "@/lib/format";
+import { useStream } from "@/lib/data";
+import { useCreatorMap } from "@/hooks/useCreatorMap";
 import { useApp } from "@/providers/app-provider";
 import type { StreamAccess } from "@/types";
 
@@ -74,16 +71,18 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
   const {
     isSubscribed,
     hasStreamAccess,
-    unlockStream,
-    subscribe,
-    tip,
+    unlockViaStripe,
+    subscribeViaStripe,
+    tipViaStripe,
     balance,
     displayName,
   } = useApp();
 
-  // Resolve the stream — either from props (real host) or mock data.
-  const stream = streamById(props.streamId ?? routeParams.id ?? "");
-  const creator = creatorById(props.creatorId ?? stream?.creatorId ?? "");
+  // Resolve the stream — either from props (real host) or the database.
+  const { data: dbStream } = useStream(props.streamId ?? routeParams.id ?? null);
+  const { get: getCreator } = useCreatorMap();
+  const stream = props.videoSource ? null : dbStream;
+  const creator = getCreator(props.creatorId ?? stream?.creatorId ?? "");
 
   const [viewers, setViewers] = useState<number>(stream?.viewers ?? 0);
   const [health, setHealth] = useState<ViewHealth>("loading");
@@ -188,18 +187,18 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
   // ---- tip routing ---------------------------------------------------------
 
   const handleTip = useCallback(
-    (amount: number, label?: string) => {
+    async (amount: number, label?: string) => {
       const cid = props.creatorId ?? stream?.creatorId ?? "";
       if (!cid) return;
-      const ok = tip(cid, amount, label);
-      if (!ok) {
-        showBanner("Not enough wallet balance — top up to keep supporting.");
+      const result = await tipViaStripe(cid, amount, label);
+      if (!result.success) {
+        showBanner(result.error ?? "Not enough wallet balance — top up to keep supporting.");
         return;
       }
       haptic("success");
       showBanner(`${label ?? "Tip"} sent · ${formatMoney(amount)}`);
     },
-    [props.creatorId, stream, tip, showBanner],
+    [props.creatorId, stream, tipViaStripe, showBanner],
   );
 
   // ---- not found -----------------------------------------------------------
@@ -265,12 +264,14 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
           <Button
             label={isPpv ? `Unlock live · ${formatMoney(price)}` : `Subscribe · ${formatMoney(price)}/mo`}
             variant={isPpv ? "ppv" : "primary"}
-            onPress={() => {
+            onPress={async () => {
               const sid = props.streamId ?? routeParams.id ?? "";
               const cid = props.creatorId ?? stream?.creatorId ?? "";
-              const ok = isPpv ? unlockStream(sid, price, cid) : subscribe(cid, price);
-              if (!ok) {
-                showBanner(`Wallet balance is ${formatMoney(balance)} — top up to join.`);
+              const result = isPpv
+                ? await unlockViaStripe(sid, price, cid, sid)
+                : await subscribeViaStripe(cid, price);
+              if (!result.success) {
+                showBanner(result.error ?? `Wallet balance is ${formatMoney(balance)} — top up to join.`);
                 return;
               }
               haptic("success");

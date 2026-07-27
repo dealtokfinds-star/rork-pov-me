@@ -5,7 +5,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Avatar, Chip, EmptyState, PressableScale, Tag } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { formatMoney } from "@/constants/mock-data";
+import { formatMoney } from "@/lib/format";
 import { useDmThreads, type DmThreadWithProfile } from "@/hooks/useDMs";
 import { useProfile } from "@/hooks/useProfile";
 

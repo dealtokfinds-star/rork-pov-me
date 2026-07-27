@@ -42,7 +42,7 @@ import {
 
 import { PressableScale, haptic } from "@/components/ui";
 import Colors, { Radius } from "@/constants/colors";
-import { CHAT_COLORS, GIFTS, randomChat } from "@/constants/mock-data";
+import { CHAT_COLORS, GIFTS, randomChat } from "@/lib/format";
 import type { ChatMessage } from "@/types";
 
 export interface ChatOverlayHandle {

@@ -18,7 +18,8 @@ import { Animated, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 
 
 import { Button, Chip, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { CATEGORIES, formatCount, formatMoney } from "@/constants/mock-data";
+import { CATEGORIES, formatCount, formatMoney } from "@/lib/format";
+import { useCategories } from "@/hooks/useDiscovery";
 import { useApp } from "@/providers/app-provider";
 import type { PovCategory, StreamAccess } from "@/types";
 
@@ -29,6 +30,8 @@ const PPV_PRICES = [3.99, 6.99, 9.99, 14.99];
 export default function GoLiveScreen() {
   const router = useRouter();
   const { creatorPrice, creatorStats } = useApp();
+  const { data: dbCategories } = useCategories();
+  const allCategories = dbCategories ?? CATEGORIES;
   const [title, setTitle] = useState<string>("");
   const [category, setCategory] = useState<PovCategory>("founder");
   const [access, setAccess] = useState<StreamAccess>("public");
@@ -172,7 +175,7 @@ export default function GoLiveScreen() {
 
       <Text style={styles.label}>Category</Text>
       <View style={styles.chipWrap}>
-        {CATEGORIES.map((c) => (
+        {allCategories.map((c) => (
           <Chip
             key={c.id}
             label={c.label}
