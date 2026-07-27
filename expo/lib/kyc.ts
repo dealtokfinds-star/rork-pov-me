@@ -22,26 +22,36 @@ async function currentUserId(): Promise<string | null> {
  *
  * Replaces Stripe Identity. The creator confirms legal name + DOB, uploads a
  * photo of their government ID to the private `verification` bucket, and an
- * admin reviews it in the trust & safety queue. Payouts use Stripe Connect —
- * see connectStripePayouts.
+ * admin reviews it in the trust & safety queue. Payouts are platform-managed —
+ * see savePayoutDestination.
  */
 
 export type KycStatus = "unverified" | "pending" | "verified" | "failed" | "suspended";
+
+/** Supported payout rails. */
+export type PayoutMethod = "paypal" | "cashapp" | "venmo" | "zelle" | "bank";
+
+export const PAYOUT_METHODS: { id: PayoutMethod; label: string; hint: string; placeholder: string }[] = [
+  { id: "paypal", label: "PayPal", hint: "Email or phone on your PayPal account", placeholder: "you@email.com" },
+  { id: "cashapp", label: "Cash App", hint: "Your $cashtag", placeholder: "$yourtag" },
+  { id: "venmo", label: "Venmo", hint: "Your @username", placeholder: "@yourname" },
+  { id: "zelle", label: "Zelle", hint: "Email or phone enrolled with Zelle", placeholder: "you@email.com" },
+  { id: "bank", label: "Bank transfer", hint: "Routing / account number", placeholder: "021000021 / 000123456789" },
+];
 
 export interface KycState {
   kycStatus: KycStatus;
   kycLastReason: string | null;
   legalName: string | null;
   dateOfBirth: string | null;
-  /** "stripe" when Connect onboarding is complete, otherwise null. */
-  payoutMethod: "stripe" | null;
-  /** Stripe account id (acct_...) when a Connect account exists. */
+  /** Selected payout rail, or null when nothing is on file. */
+  payoutMethod: PayoutMethod | null;
+  /** The destination itself (email, $cashtag, @handle, or bank digits). */
   payoutHandle: string | null;
   payoutsEnabled: boolean;
   hasUploadedId: boolean;
-  /** Stripe account status: missing | restricted | enabled */
-  accountStatus: "missing" | "restricted" | "enabled" | string | null;
-  /** Hosted onboarding URL, if onboarding is incomplete. */
+  /** missing | awaiting_review | ready */
+  accountStatus: "missing" | "awaiting_review" | "ready" | string | null;
   onboardingUrl: string | null;
 }
 
@@ -77,16 +87,21 @@ export async function fetchKycState(): Promise<KycState | null> {
     .eq("user_id", uid)
     .limit(1);
 
+  const method = PAYOUT_METHODS.some((m) => m.id === data.payout_method)
+    ? (data.payout_method as PayoutMethod)
+    : null;
+  const verified = (data.kyc_status ?? "unverified") === "verified";
+
   return {
     kycStatus: (data.kyc_status ?? "unverified") as KycStatus,
     kycLastReason: data.kyc_last_reason ?? null,
     legalName: data.legal_name ?? null,
     dateOfBirth: data.date_of_birth ?? null,
-    payoutMethod: (data.payout_method === "stripe" ? "stripe" : null),
-    payoutHandle: data.stripe_account_id ?? null,
-    payoutsEnabled: data.stripe_payouts_enabled ?? false,
+    payoutMethod: method,
+    payoutHandle: data.payout_handle ?? null,
+    payoutsEnabled: Boolean(method) && verified && data.stripe_payouts_enabled !== false,
     hasUploadedId: (docs?.length ?? 0) > 0,
-    accountStatus: data.stripe_account_status ?? null,
+    accountStatus: method ? (verified ? "ready" : "awaiting_review") : "missing",
     onboardingUrl: null,
   };
 }
@@ -206,46 +221,42 @@ export async function createSignedUrl(path: string): Promise<string | null> {
 }
 
 /**
- * Start (or resume) Stripe Connect onboarding for the signed-in creator.
- * Returns a hosted onboarding URL to open in expo-web-browser. When the
- * creator finishes onboarding, the `account.updated` webhook flips
- * stripe_payouts_enabled on their profile.
- *
- * If onboarding is already complete, returns { ok, url: null } and the caller
- * can proceed without opening a browser.
+ * Save the creator's payout destination (PayPal, Cash App, Venmo, Zelle or
+ * bank). POVMe settles fan payments on the platform account and sends
+ * withdrawals to this destination — no third-party onboarding required.
  */
-export async function connectStripePayouts(input?: {
-  country?: string;
-  refreshUrl?: string;
-  returnUrl?: string;
+export async function savePayoutDestination(input: {
+  method: PayoutMethod;
+  handle: string;
+  accountName?: string;
 }): Promise<{
   ok: boolean;
-  url: string | null;
-  account_id: string;
+  payout_method: PayoutMethod;
+  payout_label: string;
+  payout_handle: string;
   payouts_enabled: boolean;
-  details_submitted: boolean;
 }> {
   const headers = await authHeader();
   const res = await fetch(`${FUNCTIONS_URL}/functions/v1/update-payout-handle`, {
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
     body: JSON.stringify({
-      country: input?.country ?? "US",
-      refresh_url: input?.refreshUrl,
-      return_url: input?.returnUrl,
+      method: input.method,
+      handle: input.handle,
+      account_name: input.accountName,
     }),
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    const message = (data as { error?: string })?.error ?? `Connect failed (${res.status})`;
+    const message = (data as { error?: string })?.error ?? `Could not save payout destination (${res.status})`;
     throw new Error(message);
   }
   return data as {
     ok: boolean;
-    url: string | null;
-    account_id: string;
+    payout_method: PayoutMethod;
+    payout_label: string;
+    payout_handle: string;
     payouts_enabled: boolean;
-    details_submitted: boolean;
   };
 }
 

@@ -158,7 +158,7 @@ export async function cancelSubscription(
 }
 
 /**
- * Fetch the creator's Stripe Connect balance and payout history.
+ * Fetch the creator's platform ledger balance and withdrawal history.
  */
 export interface CreatorBalance {
   available: number;
@@ -170,12 +170,15 @@ export interface CreatorBalance {
     status: string;
     arrival_date: string | null;
     method: string;
+    note?: string | null;
   }>;
   payouts_enabled: boolean;
   payout_method: string | null;
+  payout_label?: string | null;
   payout_handle: string | null;
   lifetime_earnings: number;
   pending_payout: number;
+  minimum_payout?: number;
   account_status?: string | null;
   onboarding_url?: string | null;
 }
@@ -197,8 +200,8 @@ export async function fetchCreatorBalance(): Promise<CreatorBalance> {
 }
 
 /**
- * Request a payout via Stripe Connect. Issues a real Stripe Payout on the
- * creator's Express account, depositing to their linked bank account.
+ * Request a withdrawal from the platform ledger. Files a payout request that
+ * the payouts team sends to the creator's saved destination.
  */
 export async function requestPayout(
   amount?: number,
@@ -206,6 +209,9 @@ export async function requestPayout(
   request_id: string;
   amount: number;
   status: string;
+  method?: string;
+  handle?: string;
+  eta?: string;
 }> {
   const token = await getAuthToken();
   if (!token) throw new Error("Not authenticated");
