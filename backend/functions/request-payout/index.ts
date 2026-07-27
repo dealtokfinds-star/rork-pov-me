@@ -1,22 +1,18 @@
 import { requireAuth, createAdminClient, AuthError, corsHeaders, json } from "../_shared/auth.ts";
-import { createPayout, retrieveBalance, StripeError } from "../_shared/stripe.ts";
 
 /**
  * POST /request-payout
- * Requests a payout from the creator's Stripe Connect balance to their
- * linked bank account. The payout amount is either specified or the full
- * available balance.
+ * Creates a manual payout request (replaces Stripe Connect automatic payouts).
  *
  * Body: { amount?: number }  // if omitted, pays out full available balance
- * Returns: { payout_id: string, amount: number, status: string, arrival_date: string }
+ * Returns: { request_id: string, amount: number, status: string }
+ *
+ * The platform processes the payout manually via the creator's saved handle
+ * (PayPal/Venmo/CashApp/Zelle) and marks it paid in the admin queue.
  */
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-  if (req.method !== "POST") {
-    return json({ error: "Method not allowed" }, 405);
-  }
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
     const user = await requireAuth(req);
@@ -24,81 +20,62 @@ Deno.serve(async (req) => {
     const admin = createAdminClient();
 
     const { data: profile } = await admin.from("profiles")
-      .select("id, stripe_account_id, stripe_payouts_enabled, pending_payout, payout_balance")
+      .select("id, payout_method, payout_handle, stripe_payouts_enabled, pending_payout, payout_balance, lifetime_earnings")
       .eq("id", user.userId)
       .maybeSingle();
 
-    if (!profile) {
-      return json({ error: "Profile not found" }, 404);
-    }
-    if (!profile.stripe_account_id) {
-      return json({ error: "Connect account not set up" }, 400);
+    if (!profile) return json({ error: "Profile not found" }, 404);
+    if (!profile.payout_method || !profile.payout_handle) {
+      return json({ error: "Add a payout method first (PayPal, Venmo, CashApp, or Zelle)" }, 400);
     }
     if (!profile.stripe_payouts_enabled) {
-      return json({ error: "Payouts not enabled — complete onboarding first" }, 400);
+      return json({ error: "Payouts not enabled — add a payout method" }, 400);
     }
 
-    // Get available balance from Stripe
-    const balance = await retrieveBalance(profile.stripe_account_id);
-    const availableCents = balance.available?.[0]?.amount ?? 0;
-
-    let amountCents: number;
+    // Available balance = payout_balance (accrued creator share, platform-managed)
+    const available = Number(profile.payout_balance ?? 0);
+    let amount: number;
     if (body.amount && body.amount > 0) {
-      amountCents = Math.round(body.amount * 100);
-      if (amountCents > availableCents) {
-        return json({
-          error: `Insufficient balance. Available: $${(availableCents / 100).toFixed(2)}`,
-        }, 400);
+      amount = Math.round(body.amount * 100) / 100;
+      if (amount > available) {
+        return json({ error: `Insufficient balance. Available: $${available.toFixed(2)}` }, 400);
       }
     } else {
-      amountCents = availableCents;
+      amount = Math.round(available * 100) / 100;
     }
 
-    if (amountCents < 100) {
+    if (amount < 1) {
       return json({ error: "Minimum payout is $1.00" }, 400);
     }
 
-    // Create the payout via Stripe
-    const payout = await createPayout({
-      amount: amountCents,
-      currency: "usd",
-      method: "standard",
-      metadata: { user_id: user.userId },
-    }, profile.stripe_account_id);
-
-    // Record in payouts table
-    await admin.from("payouts").insert({
+    // Insert a payout request row — admin marks it paid after sending manually
+    const { data: reqRow, error: reqErr } = await admin.from("payout_requests").insert({
       creator_id: user.userId,
-      amount: amountCents / 100,
-      status: "pending",
-      stripe_payout_id: payout.id,
-      method: "stripe_connect",
-      currency: "usd",
+      amount,
+      status: "requested",
+      payout_method: profile.payout_method,
+      payout_handle: profile.payout_handle,
       requested_at: new Date().toISOString(),
-    });
+    }).select("id").single();
+    if (reqErr) {
+      console.error("[request-payout] insert:", reqErr.message);
+      return json({ error: "Could not create payout request" }, 500);
+    }
 
-    // Update profile pending payout
+    // Reserve the funds by moving them from payout_balance to pending_payout
     await admin.from("profiles").update({
-      pending_payout: Number(profile.pending_payout ?? 0) + (amountCents / 100),
+      payout_balance: Number(profile.payout_balance ?? 0) - amount,
+      pending_payout: Number(profile.pending_payout ?? 0) + amount,
       updated_at: new Date().toISOString(),
     }).eq("id", user.userId);
 
     return json({
-      payout_id: payout.id,
-      amount: amountCents / 100,
-      status: payout.status,
-      arrival_date: payout.arrival_date
-        ? new Date(payout.arrival_date * 1000).toISOString()
-        : null,
+      request_id: reqRow.id,
+      amount,
+      status: "requested",
     });
   } catch (err) {
-    if (err instanceof AuthError) {
-      return json({ error: "Unauthorized" }, 401);
-    }
-    if (err instanceof StripeError) {
-      console.error("[request-payout] Stripe error:", err.status, err.body);
-      return json({ error: err.message }, err.status);
-    }
+    if (err instanceof AuthError) return json({ error: "Unauthorized" }, 401);
     console.error("[request-payout] error:", err);
     return json({ error: "Internal server error" }, 500);
   }

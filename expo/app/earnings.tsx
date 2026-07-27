@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
-import { Banknote, Check, Clock, Landmark, RefreshCw, TrendingUp } from "lucide-react-native";
+import { Banknote, Check, Clock, Landmark, RefreshCw, TrendingUp, Wallet } from "lucide-react-native";
 import React, { useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -35,6 +35,8 @@ export default function EarningsScreen() {
   const lifetime = balance?.lifetime_earnings ?? creatorStats.gross;
   const payoutsEnabled = balance?.payouts_enabled ?? false;
   const payouts = balance?.payouts ?? [];
+  const payoutMethod = balance?.payout_method ?? null;
+  const payoutHandle = balance?.payout_handle ?? null;
 
   const handleWithdraw = async (): Promise<void> => {
     setWithdrawing(true);
@@ -78,12 +80,12 @@ export default function EarningsScreen() {
           <View style={styles.pending}>
             <Clock size={14} color={Colors.gold} />
             <Text style={styles.pendingText}>
-              Payout requested — arrives in 1–2 business days
+              Payout requested — sent to your {payoutMethod ?? "payout"} handle within 1–2 business days
             </Text>
           </View>
         ) : payoutsEnabled ? (
           <Button
-            label={withdrawing ? "Processing…" : "Withdraw to bank"}
+            label={withdrawing ? "Processing…" : `Withdraw to ${payoutMethod ?? "payout"}`}
             icon={<Banknote size={16} color={Colors.ink} />}
             onPress={() => void handleWithdraw()}
             disabled={withdrawing || available < 1}
@@ -92,7 +94,8 @@ export default function EarningsScreen() {
         ) : (
           <View style={styles.disabledBox}>
             <Text style={styles.disabledText}>
-              Payouts not enabled — complete Stripe Connect onboarding to withdraw earnings.
+              Add a payout method (PayPal, Venmo, Cash App, or Zelle) in Become a Creator to
+              withdraw earnings.
             </Text>
           </View>
         )}
@@ -124,17 +127,19 @@ export default function EarningsScreen() {
       <SectionHeader kicker="Destination" title="Payout account" />
       <View style={styles.accountCard}>
         <View style={styles.accountIcon}>
-          <Landmark size={18} color={payoutsEnabled ? Colors.success : Colors.textDim} />
+          {payoutMethod ? <Wallet size={18} color={Colors.success} /> : <Landmark size={18} color={Colors.textDim} />}
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.accountLabel}>
-            {payoutsEnabled ? "Stripe Connect · Active" : "Stripe Connect · Not set up"}
+            {payoutMethod ? `${payoutMethod} · ${payoutHandle ?? ""}` : "No payout method set"}
           </Text>
           <Text style={styles.accountSub}>
-            {payoutsEnabled ? "Weekly automatic payouts · KYC verified" : "Complete onboarding in Become a Creator"}
+            {payoutMethod
+              ? "Manual payouts · processed within 1–2 business days"
+              : "Add PayPal, Venmo, Cash App, or Zelle in Become a Creator"}
           </Text>
         </View>
-        {payoutsEnabled ? <Check size={17} color={Colors.success} /> : null}
+        {payoutMethod ? <Check size={17} color={Colors.success} /> : null}
       </View>
 
       <SectionHeader kicker="History" title="Recent payouts" />
@@ -163,9 +168,8 @@ export default function EarningsScreen() {
 
       <PressableScale>
         <Text style={styles.legal}>
-          povme keeps 20% of gross revenue. Taxes are your responsibility — download your 1099 or
-          annual statement from Settings once the year closes. Stripe handles 1099-K generation
-          for eligible accounts automatically.
+          povme keeps 20% of gross revenue. Payouts are sent manually to your saved handle.
+          Taxes are your responsibility — export your annual statement from Settings.
         </Text>
       </PressableScale>
     </ScrollView>

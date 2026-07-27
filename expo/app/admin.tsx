@@ -1,7 +1,7 @@
 import { Image } from "expo-image";
-import { AlertTriangle, BadgeCheck, Check, Eye, Flag, Pencil, Plus, Shield, Trash2, UserX, X } from "lucide-react-native";
+import { AlertTriangle, BadgeCheck, Banknote, Check, Eye, Flag, IdCard, Pencil, Plus, Shield, Trash2, UserX, X } from "lucide-react-native";
 import React, { useState } from "react";
-import { Modal, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar, Chip, PressableScale, SectionHeader, StatTile, Tag, haptic } from "@/components/ui";
@@ -9,17 +9,39 @@ import Colors, { Radius, microLabel } from "@/constants/colors";
 import { formatMoney } from "@/constants/mock-data";
 import { useAdminCategories, useCategories, type CategoryInput } from "@/hooks/useDiscovery";
 import { useProfile } from "@/hooks/useProfile";
-import { useAdmin, type ReportRow, type AdminCreatorRow } from "@/hooks/useAdmin";
+import {
+  useAdmin,
+  type ReportRow,
+  type AdminCreatorRow,
+  type VerificationDocRow,
+  type PayoutRequestRow,
+} from "@/hooks/useAdmin";
+import { createSignedUrl } from "@/lib/kyc";
 
-type Tab = "queue" | "creators" | "payments" | "categories";
+type Tab = "queue" | "verifications" | "payouts" | "creators" | "payments" | "categories";
 
 export default function AdminScreen() {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>("queue");
-  const { reports, creators, revenue, isLoading: adminLoading, adminAction } = useAdmin();
+  const {
+    reports,
+    creators,
+    revenue,
+    verifications,
+    payoutRequests,
+    isLoading: adminLoading,
+    adminAction,
+    refetch,
+  } = useAdmin();
   const { account } = useProfile();
   const [resolved, setResolved] = useState<string[]>([]);
   const [approved, setApproved] = useState<string[]>([]);
+  const [verifApproved, setVerifApproved] = useState<string[]>([]);
+  const [verifRejected, setVerifRejected] = useState<string[]>([]);
+  const [payoutPaid, setPayoutPaid] = useState<string[]>([]);
+  const [payoutFailed, setPayoutFailed] = useState<string[]>([]);
+  const [idPreviewUrl, setIdPreviewUrl] = useState<string | null>(null);
+  const [idPreviewLoading, setIdPreviewLoading] = useState<string | null>(null);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={{ paddingBottom: insets.bottom + 40 }} showsVerticalScrollIndicator={false}>
@@ -36,18 +58,20 @@ export default function AdminScreen() {
 
       <View style={styles.statRow}>
         <StatTile label="Open reports" value={`${reports.filter((r) => r.status === "open").length}`} sub="avg 4h to close" accent={Colors.magenta} />
-        <StatTile label="Pending creators" value={`${creators.filter((c) => c.kyc_status === "pending" || c.kyc_status === "unverified").length}`} sub="KYC submitted" accent={Colors.cyan} />
+        <StatTile label="ID reviews" value={`${verifications.filter((v) => v.status === "pending").length}`} sub="awaiting review" accent={Colors.cyan} />
       </View>
       <View style={styles.statRow}>
-        <StatTile label="Auto-flags" value="128" sub="last 7 days" accent={Colors.gold} />
-        <StatTile label="Held payouts" value={formatMoney(2140)} sub="2 accounts" accent={Colors.danger} />
+        <StatTile label="Payout requests" value={`${payoutRequests.filter((p) => p.status === "requested").length}`} sub="to process" accent={Colors.gold} />
+        <StatTile label="Pending creators" value={`${creators.filter((c) => c.kyc_status === "pending" || c.kyc_status === "unverified").length}`} sub="KYC submitted" accent={Colors.lime} />
       </View>
 
       <View style={styles.tabRow}>
-        <Chip label="Review queue" active={tab === "queue"} onPress={() => setTab("queue")} />
-        <Chip label="Applications" active={tab === "creators"} onPress={() => setTab("creators")} />
+        <Chip label="Reports" active={tab === "queue"} onPress={() => setTab("queue")} />
+        <Chip label="ID reviews" active={tab === "verifications"} onPress={() => setTab("verifications")} />
+        <Chip label="Payouts" active={tab === "payouts"} onPress={() => setTab("payouts")} />
+        <Chip label="Creators" active={tab === "creators"} onPress={() => setTab("creators")} />
         <Chip label="Categories" active={tab === "categories"} onPress={() => setTab("categories")} />
-        <Chip label="Payments" active={tab === "payments"} onPress={() => setTab("payments")} />
+        <Chip label="Revenue" active={tab === "payments"} onPress={() => setTab("payments")} />
       </View>
 
       {tab === "queue" ? (
@@ -229,8 +253,274 @@ export default function AdminScreen() {
         </View>
       ) : null}
 
+      {tab === "verifications" ? (
+        <VerificationQueue
+          docs={verifications}
+          approved={verifApproved}
+          rejected={verifRejected}
+          onApprove={async (userId) => {
+            const r = await adminAction("approve_verification", { user_id: userId });
+            if (r.ok) {
+              setVerifApproved((p) => [...p, userId]);
+              haptic("success");
+            }
+          }}
+          onReject={async (userId) => {
+            const r = await adminAction("reject_verification", { user_id: userId, reason: "ID not acceptable" });
+            if (r.ok) {
+              setVerifRejected((p) => [...p, userId]);
+              haptic("heavy");
+            }
+          }}
+          onView={async (path) => {
+            setIdPreviewLoading(path);
+            const url = await createSignedUrl(path);
+            setIdPreviewUrl(url);
+            setIdPreviewLoading(null);
+          }}
+          idPreviewUrl={idPreviewUrl}
+          idPreviewLoading={idPreviewLoading}
+          onClosePreview={() => setIdPreviewUrl(null)}
+          isLoading={adminLoading}
+        />
+      ) : null}
+
+      {tab === "payouts" ? (
+        <PayoutQueue
+          requests={payoutRequests}
+          paid={payoutPaid}
+          failed={payoutFailed}
+          onMarkPaid={async (id) => {
+            const r = await adminAction("mark_payout_paid", { payout_id: id });
+            if (r.ok) {
+              setPayoutPaid((p) => [...p, id]);
+              haptic("success");
+            }
+          }}
+          onMarkFailed={async (id) => {
+            const r = await adminAction("mark_payout_failed", { payout_id: id, note: "Handle invalid" });
+            if (r.ok) {
+              setPayoutFailed((p) => [...p, id]);
+              haptic("heavy");
+            }
+          }}
+          isLoading={adminLoading}
+        />
+      ) : null}
+
       {tab === "categories" ? <CategoryManager /> : null}
     </ScrollView>
+  );
+}
+
+// ─── ID verification queue ────────────────────────────────────────────────
+
+function VerificationQueue({
+  docs,
+  approved,
+  rejected,
+  onApprove,
+  onReject,
+  onView,
+  idPreviewUrl,
+  idPreviewLoading,
+  onClosePreview,
+  isLoading,
+}: {
+  docs: VerificationDocRow[];
+  approved: string[];
+  rejected: string[];
+  onApprove: (userId: string) => Promise<void>;
+  onReject: (userId: string) => Promise<void>;
+  onView: (path: string) => Promise<void>;
+  idPreviewUrl: string | null;
+  idPreviewLoading: string | null;
+  onClosePreview: () => void;
+  isLoading: boolean;
+}) {
+  const pending = docs.filter((d) => d.status === "pending" && !approved.includes(d.user_id) && !rejected.includes(d.user_id));
+  const reviewed = docs.filter((d) => d.status !== "pending" || approved.includes(d.user_id) || rejected.includes(d.user_id));
+
+  return (
+    <View style={{ paddingHorizontal: 18, gap: 10, marginTop: 18 }}>
+      {isLoading ? (
+        <Text style={styles.cardMeta}>Loading verification queue…</Text>
+      ) : pending.length === 0 ? (
+        <Text style={styles.cardMeta}>No IDs waiting for review. 🎉</Text>
+      ) : (
+        pending.map((d) => (
+          <View key={d.id} style={styles.card}>
+            <View style={styles.cardHead}>
+              <View style={[styles.thumb, { backgroundColor: Colors.surfaceHi, alignItems: "center", justifyContent: "center" }]}>
+                <IdCard size={22} color={Colors.lime} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>{d.legal_name ?? d.name ?? d.handle ?? "Unknown"}</Text>
+                <Text style={styles.cardMeta}>
+                  {d.doc_type} · uploaded {d.uploaded_at ? new Date(d.uploaded_at).toLocaleDateString() : "—"}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.actionRow}>
+              <ActionBtn
+                icon={<Eye size={14} color={Colors.text} />}
+                label={idPreviewLoading === d.storage_path ? "Loading…" : "View ID"}
+                onPress={() => void onView(d.storage_path)}
+              />
+              <ActionBtn
+                icon={<Check size={14} color={Colors.lime} />}
+                label="Approve"
+                tint={Colors.lime}
+                onPress={() => void onApprove(d.user_id)}
+              />
+              <ActionBtn
+                icon={<X size={14} color={Colors.danger} />}
+                label="Reject"
+                tint={Colors.danger}
+                onPress={() => void onReject(d.user_id)}
+              />
+            </View>
+          </View>
+        ))
+      )}
+
+      {reviewed.length > 0 ? (
+        <View style={{ marginTop: 10, gap: 8 }}>
+          <Text style={styles.cardMeta}>Recently reviewed</Text>
+          {reviewed.slice(0, 6).map((d) => (
+            <View key={d.id} style={[styles.card, { opacity: 0.6 }]}>
+              <View style={styles.cardHead}>
+                <View style={[styles.thumb, { backgroundColor: Colors.surfaceHi, alignItems: "center", justifyContent: "center" }]}>
+                  <IdCard size={20} color={Colors.textDim} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardTitle}>{d.legal_name ?? d.name ?? "Unknown"}</Text>
+                  <Text style={styles.cardMeta}>
+                    {d.status} · {d.reviewed_at ? new Date(d.reviewed_at).toLocaleDateString() : ""}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {/* ID preview modal */}
+      <Modal visible={idPreviewUrl !== null} transparent animationType="fade" onRequestClose={onClosePreview}>
+        <Pressable style={styles.idPreviewWrap} onPress={onClosePreview}>
+          <View style={styles.idPreviewSheet}>
+            <Text style={styles.modalTitle}>Government ID</Text>
+            {idPreviewUrl ? (
+              <Image source={{ uri: idPreviewUrl }} style={styles.idPreviewImage} contentFit="contain" />
+            ) : (
+              <Text style={styles.cardMeta}>No image</Text>
+            )}
+            <PressableScale onPress={onClosePreview} scaleTo={0.96} style={{ marginTop: 14 }}>
+              <View style={styles.cancelBtn}>
+                <Text style={styles.cancelText}>Close</Text>
+              </View>
+            </PressableScale>
+          </View>
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
+
+// ─── Payout queue ─────────────────────────────────────────────────────────
+
+function PayoutQueue({
+  requests,
+  paid,
+  failed,
+  onMarkPaid,
+  onMarkFailed,
+  isLoading,
+}: {
+  requests: PayoutRequestRow[];
+  paid: string[];
+  failed: string[];
+  onMarkPaid: (id: string) => Promise<void>;
+  onMarkFailed: (id: string) => Promise<void>;
+  isLoading: boolean;
+}) {
+  const pending = requests.filter((r) => r.status === "requested" && !paid.includes(r.id) && !failed.includes(r.id));
+  const processed = requests.filter((r) => r.status !== "requested" || paid.includes(r.id) || failed.includes(r.id));
+
+  return (
+    <View style={{ paddingHorizontal: 18, gap: 10, marginTop: 18 }}>
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Payouts to process</Text>
+        <Text style={styles.cardMeta}>
+          {pending.length} request{pending.length === 1 ? "" : "s"} · total {formatMoney(pending.reduce((s, r) => s + Number(r.amount), 0))}
+        </Text>
+      </View>
+
+      {isLoading ? (
+        <Text style={styles.cardMeta}>Loading payout queue…</Text>
+      ) : pending.length === 0 ? (
+        <Text style={styles.cardMeta}>No payout requests waiting. 🎉</Text>
+      ) : (
+        pending.map((r) => (
+          <View key={r.id} style={styles.card}>
+            <View style={styles.cardHead}>
+              <View style={[styles.thumb, { backgroundColor: Colors.surfaceHi, alignItems: "center", justifyContent: "center" }]}>
+                <Banknote size={22} color={Colors.gold} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>{r.name ?? r.handle ?? "Creator"}</Text>
+                <Text style={styles.cardMeta}>
+                  {r.payout_method} · {r.payout_handle}
+                </Text>
+                <Text style={styles.cardMeta}>
+                  Requested {r.requested_at ? new Date(r.requested_at).toLocaleDateString() : "—"}
+                </Text>
+              </View>
+              <Text style={styles.bigValue}>{formatMoney(Number(r.amount))}</Text>
+            </View>
+            <View style={styles.actionRow}>
+              <ActionBtn
+                icon={<Check size={14} color={Colors.lime} />}
+                label="Mark paid"
+                tint={Colors.lime}
+                onPress={() => void onMarkPaid(r.id)}
+              />
+              <ActionBtn
+                icon={<X size={14} color={Colors.danger} />}
+                label="Failed"
+                tint={Colors.danger}
+                onPress={() => void onMarkFailed(r.id)}
+              />
+            </View>
+          </View>
+        ))
+      )}
+
+      {processed.length > 0 ? (
+        <View style={{ marginTop: 10, gap: 8 }}>
+          <Text style={styles.cardMeta}>Recently processed</Text>
+          {processed.slice(0, 8).map((r) => {
+            const done = paid.includes(r.id) || r.status === "paid";
+            return (
+              <View key={r.id} style={[styles.card, { opacity: 0.6 }]}>
+                <View style={styles.cardHead}>
+                  <View style={[styles.thumb, { backgroundColor: Colors.surfaceHi, alignItems: "center", justifyContent: "center" }]}>
+                    <Banknote size={20} color={Colors.textDim} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardTitle}>{r.name ?? r.handle ?? "Creator"}</Text>
+                    <Text style={styles.cardMeta}>{r.payout_method} · {formatMoney(Number(r.amount))}</Text>
+                  </View>
+                  <Text style={[styles.payoutStatus, !done && { color: Colors.danger }]}>
+                    {done ? "paid" : r.status}
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -691,4 +981,28 @@ const styles = StyleSheet.create({
     gap: 7,
   },
   deleteText: { color: "#fff", fontSize: 14, fontWeight: "900" },
+  // ID preview modal
+  idPreviewWrap: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.85)",
+    padding: 20,
+  },
+  idPreviewSheet: {
+    width: "100%",
+    backgroundColor: Colors.surface,
+    borderRadius: 20,
+    padding: 18,
+    alignItems: "center",
+    gap: 12,
+  },
+  idPreviewImage: {
+    width: "100%",
+    height: 280,
+    borderRadius: 12,
+    backgroundColor: Colors.bg,
+  },
+  // Payout queue
+  payoutStatus: { color: Colors.success, fontSize: 11.5, fontWeight: "900" },
 });
