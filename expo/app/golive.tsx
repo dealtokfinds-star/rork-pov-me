@@ -6,6 +6,7 @@ import {
   Check,
   Gauge,
   Lock,
+  Loader,
   MessageSquareOff,
   Monitor,
   Radio,
@@ -15,13 +16,14 @@ import {
   UserPlus,
   Users,
 } from "lucide-react-native";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { Animated, Modal, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
 import { Button, Chip, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import { CATEGORIES, formatCount, formatMoney } from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
+import { createLiveStream, type CreatedLiveStream } from "@/lib/streaming/muxLive";
 import type { PovCategory, StreamAccess } from "@/types";
 
 type Source = "chest" | "phone" | "desktop";
@@ -40,11 +42,12 @@ export default function GoLiveScreen() {
   const [replay, setReplay] = useState<boolean>(true);
   const [coHost, setCoHost] = useState<boolean>(false);
   const [subOnlyChat, setSubOnlyChat] = useState<boolean>(false);
-  const [onAir, setOnAir] = useState<boolean>(false);
-  const [seconds, setSeconds] = useState<number>(0);
-  const [viewers, setViewers] = useState<number>(0);
-  const [earned, setEarned] = useState<number>(0);
+
+  // Provisioning state — calling create-live-stream (real Mux).
+  const [provisioning, setProvisioning] = useState<boolean>(false);
+  const [provisionError, setProvisionError] = useState<string | null>(null);
   const pulse = useRef(new Animated.Value(0)).current;
+
   const [showConsent, setShowConsent] = useState<boolean>(false);
   const [pendingAction, setPendingAction] = useState<null | (() => void)>(null);
 
@@ -68,92 +71,50 @@ export default function GoLiveScreen() {
     if (action) action();
   }, [pendingAction]);
 
-  useEffect(() => {
-    if (!onAir) return;
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: 900, useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    const timer = setInterval(() => {
-      setSeconds((s) => s + 1);
-      setViewers((v) => v + Math.floor(Math.random() * 24));
-      setEarned((e) => Math.round((e + Math.random() * 6) * 100) / 100);
-    }, 1000);
-    return () => {
-      loop.stop();
-      clearInterval(timer);
-    };
-  }, [onAir, pulse]);
+  /**
+   * Provision a real Mux Live Stream, then route to the host screen with the
+   * stream id + RTMP key so the host UI can show the encoder-connect card and
+   * poll real health.
+   */
+  const goLive = useCallback(async (): Promise<void> => {
+    setProvisioning(true);
+    setProvisionError(null);
+    haptic("heavy");
+    try {
+      const stream: CreatedLiveStream = await createLiveStream({
+        title: title.trim().length > 0 ? title.trim() : "Untitled POV stream",
+        category,
+        access,
+        ppvPrice: access === "ppv" ? ppvPrice : undefined,
+        streamSource: source,
+        replayEnabled: replay,
+        slowMode,
+        subOnlyChat,
+        latencyMode: "low",
+      });
 
-  if (onAir) {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return (
-      <ScrollView style={styles.screen} contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
-        <View style={styles.onAirCard}>
-          <LinearGradient
-            colors={["rgba(255,45,111,0.28)", "rgba(19,19,24,0.1)"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={StyleSheet.absoluteFill}
-          />
-          <Animated.View
-            style={[
-              styles.onAirBadge,
-              { opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 0.5] }) },
-            ]}
-          >
-            <Radio size={13} color="#fff" />
-            <Text style={styles.onAirBadgeText}>ON AIR</Text>
-          </Animated.View>
-          <Text style={styles.onAirTitle}>{title.trim().length > 0 ? title : "Untitled POV stream"}</Text>
-          <Text style={styles.onAirTimer}>
-            {mins.toString().padStart(2, "0")}:{secs.toString().padStart(2, "0")}
-          </Text>
-          <View style={styles.onAirStats}>
-            <LiveStat label="Watching" value={formatCount(viewers)} />
-            <LiveStat label="Earned" value={formatMoney(earned)} accent={Colors.lime} />
-            <LiveStat label="Your cut" value={formatMoney(earned * 0.8)} accent={Colors.gold} />
-          </View>
-        </View>
-
-        <Text style={styles.kicker}>Stream health</Text>
-        <View style={styles.healthCard}>
-          <HealthRow label="Bitrate" value="6,200 kbps" ok />
-          <HealthRow label="Resolution" value="1080p60" ok />
-          <HealthRow label="Source" value={source === "chest" ? "Chest rig (RTMP)" : source === "phone" ? "Phone camera" : "Desktop encoder"} ok />
-          <HealthRow label="Dropped frames" value="0.2%" ok />
-        </View>
-
-        <Text style={styles.kicker}>Moderation</Text>
-        <View style={styles.healthCard}>
-          <ToggleRow icon={<Timer size={16} color={Colors.lime} />} label="Slow mode (10s)" value={slowMode} onChange={setSlowMode} />
-          <ToggleRow icon={<Lock size={16} color={Colors.lime} />} label="Subscriber-only chat" value={subOnlyChat} onChange={setSubOnlyChat} />
-          <ToggleRow icon={<UserPlus size={16} color={Colors.lime} />} label="Co-host invite open" value={coHost} onChange={setCoHost} />
-          <ToggleRow icon={<MessageSquareOff size={16} color={Colors.lime} />} label="Auto-hide flagged words" value onChange={() => {}} />
-        </View>
-
-        <Button
-          label="End stream"
-          variant="live"
-          onPress={() => {
-            setOnAir(false);
-            haptic("heavy");
-            router.replace("/(tabs)/studio");
-          }}
-          style={{ marginTop: 24 }}
-        />
-        <Text style={styles.legal}>
-          {replay
-            ? "Replay is on — the VOD publishes to your feed with the same access level."
-            : "Replay is off — this stream disappears when you end it."}
-        </Text>
-      </ScrollView>
-    );
-  }
+      haptic("success");
+      // Route to the host screen with the real stream data.
+      const qp = new URLSearchParams({
+        title: title.trim().length > 0 ? title.trim() : "Untitled POV stream",
+        category,
+        access,
+        streamId: stream.streamId,
+        rtmpUrl: stream.rtmpIngestUrl,
+        rtmpKey: stream.rtmpStreamKey ?? "",
+        hlsUrl: stream.hlsPlaybackUrl ?? "",
+        source,
+      });
+      if (access === "ppv" && ppvPrice) qp.set("ppvPrice", String(ppvPrice));
+      router.push(`/host?${qp.toString()}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Could not start the live stream.";
+      setProvisionError(friendly(msg));
+      haptic("heavy");
+    } finally {
+      setProvisioning(false);
+    }
+  }, [title, category, access, ppvPrice, source, replay, slowMode, subOnlyChat, router]);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={{ padding: 20, paddingBottom: 44 }} keyboardShouldPersistTaps="handled">
@@ -180,8 +141,8 @@ export default function GoLiveScreen() {
         />
         <SourceOption
           icon={<Smartphone size={17} color={source === "phone" ? Colors.ink : Colors.magenta} />}
-          title="This phone"
-          body="Front or rear camera, vertical POV"
+          title="This phone (monitor + encoder)"
+          body="RTMP key shown · phone is your monitor while an encoder broadcasts"
           active={source === "phone"}
           onPress={() => setSource("phone")}
         />
@@ -267,30 +228,18 @@ export default function GoLiveScreen() {
         </Text>
       </View>
 
+      {provisionError ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>{provisionError}</Text>
+        </View>
+      ) : null}
+
       <Button
-        label={source === "phone" ? "Open camera & go live" : "Go live now"}
+        label={provisioning ? "Starting stream…" : "Go live now"}
         variant="live"
-        icon={<Radio size={17} color="#fff" />}
-        onPress={() =>
-          void gateWithConsent(() => {
-            if (source === "phone") {
-              // Launch the real camera broadcast surface.
-              const qp = new URLSearchParams({
-                title: title.trim() || "Untitled POV stream",
-                category,
-                access,
-              });
-              if (access === "ppv" && ppvPrice) qp.set("ppvPrice", String(ppvPrice));
-              haptic("heavy");
-              router.push(`/host?${qp.toString()}`);
-              return;
-            }
-            setOnAir(true);
-            setSeconds(0);
-            setViewers(Math.floor(Math.random() * 120) + 40);
-            haptic("heavy");
-          })
-        }
+        icon={provisioning ? <Loader size={17} color="#fff" /> : <Radio size={17} color="#fff" />}
+        disabled={provisioning}
+        onPress={() => void gateWithConsent(() => void goLive())}
         style={{ marginTop: 24 }}
       />
       <Text style={styles.legal}>
@@ -389,23 +338,14 @@ function ToggleRow({
   );
 }
 
-function HealthRow({ label, value, ok }: { label: string; value: string; ok: boolean }) {
-  return (
-    <View style={styles.toggleRow}>
-      <View style={[styles.healthDot, { backgroundColor: ok ? Colors.success : Colors.danger }]} />
-      <Text style={styles.toggleLabel}>{label}</Text>
-      <Text style={styles.healthValue}>{value}</Text>
-    </View>
-  );
-}
-
-function LiveStat({ label, value, accent = Colors.text }: { label: string; value: string; accent?: string }) {
-  return (
-    <View style={{ flex: 1 }}>
-      <Text style={styles.liveStatLabel}>{label}</Text>
-      <Text style={[styles.liveStatValue, { color: accent }]}>{value}</Text>
-    </View>
-  );
+function friendly(msg: string): string {
+  if (msg.includes("Failed to fetch") || msg.includes("Network request failed")) {
+    return "Network error. Check your connection and try again.";
+  }
+  if (msg.includes("exp") && msg.includes("claim")) {
+    return "Your session expired. Please sign in again.";
+  }
+  return msg;
 }
 
 const styles = StyleSheet.create({
@@ -470,8 +410,6 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
   },
   toggleLabel: { flex: 1, color: Colors.text, fontSize: 13, fontWeight: "700" },
-  healthDot: { width: 8, height: 8, borderRadius: 4 },
-  healthValue: { color: Colors.textMid, fontSize: 12.5, fontWeight: "800" },
   hint: { color: Colors.textDim, fontSize: 11.5, fontWeight: "600", marginTop: 10 },
   previewBox: {
     marginTop: 22,
@@ -484,6 +422,15 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   previewText: { color: Colors.text, fontSize: 13, fontWeight: "600", lineHeight: 19 },
+  errorBanner: {
+    marginTop: 16,
+    padding: 14,
+    borderRadius: Radius.md,
+    backgroundColor: "rgba(255,59,48,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,59,48,0.3)",
+  },
+  errorText: { color: Colors.danger, fontSize: 13, fontWeight: "700" },
   legal: { color: Colors.textDim, fontSize: 11, fontWeight: "600", lineHeight: 17, marginTop: 16 },
   consentOverlay: {
     flex: 1,
@@ -509,28 +456,4 @@ const styles = StyleSheet.create({
   },
   consentTitle: { color: Colors.text, fontSize: 22, fontWeight: "900", letterSpacing: -0.6 },
   consentBody: { color: Colors.textMid, fontSize: 13.5, fontWeight: "500", lineHeight: 20 },
-  onAirCard: {
-    padding: 22,
-    borderRadius: Radius.lg,
-    overflow: "hidden",
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: "rgba(255,45,111,0.35)",
-  },
-  onAirBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    alignSelf: "flex-start",
-    backgroundColor: Colors.magenta,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 7,
-  },
-  onAirBadgeText: { color: "#fff", ...microLabel, fontSize: 10 },
-  onAirTitle: { color: Colors.text, fontSize: 19, fontWeight: "900", letterSpacing: -0.6, marginTop: 14 },
-  onAirTimer: { color: Colors.text, fontSize: 40, fontWeight: "900", letterSpacing: -2, marginTop: 6 },
-  onAirStats: { flexDirection: "row", marginTop: 18 },
-  liveStatLabel: { ...microLabel, color: Colors.textDim },
-  liveStatValue: { fontSize: 17, fontWeight: "900", marginTop: 5 },
 });

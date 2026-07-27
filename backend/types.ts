@@ -307,8 +307,12 @@ export type Database = {
           duration_sec: number | null
           id: string
           likes: number | null
+          mux_asset_id: string | null
+          mux_upload_id: string | null
           posted_at: string | null
           ppv_price: number | null
+          scheduled_at: string | null
+          status: string
           thumb_url: string | null
           tips: number | null
           title: string
@@ -325,8 +329,12 @@ export type Database = {
           duration_sec?: number | null
           id?: string
           likes?: number | null
+          mux_asset_id?: string | null
+          mux_upload_id?: string | null
           posted_at?: string | null
           ppv_price?: number | null
+          scheduled_at?: string | null
+          status?: string
           thumb_url?: string | null
           tips?: number | null
           title: string
@@ -343,8 +351,12 @@ export type Database = {
           duration_sec?: number | null
           id?: string
           likes?: number | null
+          mux_asset_id?: string | null
+          mux_upload_id?: string | null
           posted_at?: string | null
           ppv_price?: number | null
+          scheduled_at?: string | null
+          status?: string
           thumb_url?: string | null
           tips?: number | null
           title?: string

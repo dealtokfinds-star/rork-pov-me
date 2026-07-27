@@ -36,6 +36,8 @@ interface MuxEvent {
     duration?: number;
     // For asset events tied to a live stream:
     live_stream_id?: string;
+    // For direct uploads, the passthrough we set on the upload = episode id.
+    passthrough?: string | null;
     // For live stream events, `recent_asset_ids` may be present.
     recent_asset_ids?: string[];
     active_asset_id?: string | null;
@@ -182,10 +184,60 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     case "video.asset.ready": {
-      // An asset finished preparing. If it came from a live stream and
-      // we haven't yet created the replay episode, do it now (covers the
-      // case where end-live-stream's poll timed out).
       const liveStreamId = event.data.live_stream_id;
+      const passthrough = event.data.passthrough ?? null;
+
+      // ---- Direct upload path ----
+      // A creator uploaded a video file via create-upload-url. The passthrough
+      // is the episode id we set on the Mux upload. Finalize the placeholder.
+      if (!liveStreamId && passthrough) {
+        const playback = event.data.playback_ids?.[0];
+        if (!playback) break;
+        const thumbUrl = `https://image.mux.com/${playback.id}/thumbnail.jpg`;
+        const videoUrl = `https://stream.mux.com/${playback.id}.m3u8`;
+        const durationSec = Math.round(event.data.duration ?? 0);
+
+        // Look up the placeholder to determine the intended status.
+        const { data: placeholder } = await supabase
+          .from("episodes")
+          .select("id, status, scheduled_at")
+          .eq("id", passthrough)
+          .maybeSingle();
+        if (!placeholder) {
+          console.log("[mux-webhook] direct-upload placeholder not found", passthrough);
+          break;
+        }
+
+        // Flip status: a placeholder left in "uploading"/"transcoding" with
+        // no scheduled_at publishes immediately. Scheduled ones stay scheduled.
+        const prevStatus = placeholder.status ?? "uploading";
+        const scheduledAt = placeholder.scheduled_at;
+        const finalStatus =
+          prevStatus === "scheduled" || scheduledAt
+            ? "scheduled"
+            : "published";
+        const postedAt = finalStatus === "published"
+          ? new Date().toISOString()
+          : scheduledAt ?? null;
+
+        await supabase
+          .from("episodes")
+          .update({
+            video_url: videoUrl,
+            thumb_url: thumbUrl,
+            duration_sec: durationSec,
+            mux_asset_id: event.data.id,
+            status: finalStatus,
+            posted_at: postedAt,
+          })
+          .eq("id", passthrough);
+        break;
+      }
+
+      // ---- Live replay path ----
+      // An asset finished preparing from a live stream. If we haven't yet
+      // created the replay episode, do it now (covers the case where
+      // end-live-stream's poll timed out).
       if (!liveStreamId) break;
       const { data: stream } = await supabase
         .from("live_streams")
@@ -210,6 +262,8 @@ export default async function handler(req: Request): Promise<Response> {
           ppv_price: stream.ppv_price,
           category: stream.category,
           chapter: "replay",
+          status: "published",
+          posted_at: new Date().toISOString(),
         })
         .select("id")
         .single();

@@ -1,34 +1,72 @@
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { Check, Clock, FilePlus2, Lock, Unlock, UploadCloud, Users } from "lucide-react-native";
-import React, { useCallback, useState } from "react";
-import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  AlertCircle,
+  Camera,
+  Check,
+  Clock,
+  Clapperboard,
+  FilePlus2,
+  Film,
+  Lock,
+  Loader,
+  Unlock,
+  UploadCloud,
+  Users,
+  Video,
+} from "lucide-react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 
 import { Button, Chip, PressableScale, ProgressBar, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import { CATEGORIES, formatMoney } from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
+import {
+  awaitAssetReady,
+  createUploadUrl,
+  updateEpisodePublish,
+  uploadFile,
+} from "@/lib/muxUpload";
 import type { AccessLevel, PovCategory } from "@/types";
 
 const CHAPTERS = ["Morning", "Work", "Gym", "Night out", "Travel day", "Debrief"];
 const PPV_PRICES = [4.99, 6.99, 9.99, 12.99, 14.99, 19.99];
 
+type Phase = "choose" | "uploading" | "transcoding" | "ready" | "error";
+
 export default function UploadScreen() {
   const router = useRouter();
   const { publishEpisode, creatorPrice } = useApp();
+
   const [title, setTitle] = useState<string>("");
   const [description, setDescription] = useState<string>("");
-  const [thumb, setThumb] = useState<string>(
-    "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=600&q=80",
-  );
+  const [thumb, setThumb] = useState<string | null>(null);
   const [category, setCategory] = useState<PovCategory>("founder");
   const [chapter, setChapter] = useState<string>("Work");
   const [access, setAccess] = useState<AccessLevel>("subscribers");
   const [ppvPrice, setPpvPrice] = useState<number>(9.99);
+
+  const [phase, setPhase] = useState<Phase>("choose");
   const [progress, setProgress] = useState<number>(0);
-  const [uploaded, setUploaded] = useState<boolean>(false);
+  const [videoUri, setVideoUri] = useState<string | null>(null);
+  const [videoLabel, setVideoLabel] = useState<string>("");
+  const [episodeId, setEpisodeId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [published, setPublished] = useState<"published" | "scheduled" | "draft" | null>(null);
+  const [submitting, setSubmitting] = useState<boolean>(false);
+
+  // Reset to choose phase when the video is cleared.
+  useEffect(() => {
+    if (!videoUri && phase !== "error") setPhase("choose");
+  }, [videoUri, phase]);
 
   const pickThumb = useCallback(async (): Promise<void> => {
     try {
@@ -42,44 +80,161 @@ export default function UploadScreen() {
         setThumb(result.assets[0].uri);
         haptic("light");
       }
-    } catch (error) {
-      console.log("[povme] thumbnail pick failed", error);
+    } catch (err) {
+      console.log("[povme] thumbnail pick failed", err);
     }
   }, []);
 
-  const simulateUpload = useCallback((): void => {
-    setProgress(0.05);
-    haptic("medium");
-    let value = 0.05;
-    const timer = setInterval(() => {
-      value += 0.09 + Math.random() * 0.08;
-      if (value >= 1) {
-        setProgress(1);
-        setUploaded(true);
-        clearInterval(timer);
-        haptic("success");
+  const pickVideo = useCallback(async (): Promise<void> => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setError("Photo library access is required to pick a video.");
+        setPhase("error");
         return;
       }
-      setProgress(value);
-    }, 320);
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["videos"],
+        quality: 1,
+        allowsEditing: true,
+        videoExportPreset: ImagePicker.VideoExportPreset.HighestQuality,
+      });
+      if (result.canceled || !result.assets[0]?.uri) return;
+      const asset = result.assets[0];
+      const label = asset.fileName ?? "video.mp4";
+      startUpload(asset.uri, label);
+    } catch (err) {
+      console.log("[povme] video pick failed", err);
+      setError("Could not open the video picker.");
+      setPhase("error");
+    }
+  }, []);
+
+  const recordVideo = useCallback(async (): Promise<void> => {
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        setError("Camera access is required to record a video.");
+        setPhase("error");
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["videos"],
+        quality: 1,
+        allowsEditing: true,
+        videoExportPreset: ImagePicker.VideoExportPreset.HighestQuality,
+      });
+      if (result.canceled || !result.assets[0]?.uri) return;
+      const asset = result.assets[0];
+      const label = asset.fileName ?? "camera_take.mp4";
+      startUpload(asset.uri, label);
+    } catch (err) {
+      console.log("[povme] video record failed", err);
+      setError("Could not open the camera.");
+      setPhase("error");
+    }
+  }, []);
+
+  /** Kick off the real Mux direct-upload pipeline. */
+  const startUpload = useCallback(async (uri: string, label: string): Promise<void> => {
+    setVideoUri(uri);
+    setVideoLabel(label);
+    setError(null);
+    setPhase("uploading");
+    setProgress(0);
+    haptic("medium");
+
+    try {
+      const { uploadUrl, episodeId: epId } = await createUploadUrl({
+        title: title.trim().length > 0 ? title.trim() : "Untitled POV episode",
+        category,
+        chapter,
+        thumbUrl: thumb ?? undefined,
+      });
+      setEpisodeId(epId);
+
+      await uploadFile(uri, uploadUrl, (frac) => {
+        setProgress(frac);
+      });
+
+      // PUT done — now Mux transcodes. Poll until the asset is ready.
+      setProgress(1);
+      setPhase("transcoding");
+      haptic("success");
+
+      const finalized = await awaitAssetReady(epId);
+      if (finalized?.video_url) {
+        setPhase("ready");
+        haptic("success");
+      } else {
+        // Timed out waiting — the webhook is still expected to finalize.
+        // Show ready with a note so the creator can publish and trust the
+        // backend to finish.
+        setPhase("ready");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Upload failed.";
+      setError(msg);
+      setPhase("error");
+      haptic("heavy");
+    }
+  }, [title, category, chapter, thumb]);
+
+  const retryUpload = useCallback((): void => {
+    if (videoUri) {
+      startUpload(videoUri, videoLabel);
+    } else {
+      setPhase("choose");
+    }
+  }, [videoUri, videoLabel, startUpload]);
+
+  const clearVideo = useCallback((): void => {
+    setVideoUri(null);
+    setVideoLabel("");
+    setEpisodeId(null);
+    setProgress(0);
+    setError(null);
+    setPhase("choose");
   }, []);
 
   const submit = useCallback(
-    (status: "published" | "scheduled" | "draft") => {
-      publishEpisode({
-        title: title.trim().length > 0 ? title.trim() : "Untitled POV episode",
-        thumb,
-        access,
-        ppvPrice: access === "ppv" ? ppvPrice : undefined,
-        category,
-        status,
-      });
-      setPublished(status);
+    async (status: "published" | "scheduled" | "draft"): Promise<void> => {
+      setSubmitting(true);
       haptic("success");
+      try {
+        // Update the real episodes row with the publish metadata.
+        if (episodeId) {
+          await updateEpisodePublish(episodeId, {
+            status,
+            access,
+            ppvPrice: access === "ppv" ? ppvPrice : null,
+            category,
+            title: title.trim().length > 0 ? title.trim() : "Untitled POV episode",
+            thumbUrl: thumb ?? undefined,
+          });
+        }
+        // Also update the local studio list for immediate UI feedback.
+        publishEpisode({
+          title: title.trim().length > 0 ? title.trim() : "Untitled POV episode",
+          thumb: thumb ?? "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=600&q=80",
+          access,
+          ppvPrice: access === "ppv" ? ppvPrice : undefined,
+          category,
+          status,
+        });
+        setPublished(status);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Publish failed.";
+        setError(msg);
+        setPhase("error");
+      } finally {
+        setSubmitting(false);
+      }
     },
-    [publishEpisode, title, thumb, access, ppvPrice, category],
+    [episodeId, access, ppvPrice, category, title, thumb, publishEpisode],
   );
 
+  // ---- Success screen ----
   if (published) {
     return (
       <View style={[styles.screen, styles.doneWrap]}>
@@ -105,38 +260,25 @@ export default function UploadScreen() {
     );
   }
 
+  const canPublish = phase === "ready";
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={{ padding: 20, paddingBottom: 44 }} keyboardShouldPersistTaps="handled">
       <Text style={styles.kicker}>New POV episode</Text>
 
-      <PressableScale onPress={progress === 0 ? simulateUpload : undefined} scaleTo={0.98}>
-        <View style={styles.dropzone}>
-          {progress === 0 ? (
-            <>
-              <View style={styles.dropIcon}>
-                <UploadCloud size={22} color={Colors.ink} />
-              </View>
-              <Text style={styles.dropTitle}>Upload your POV footage</Text>
-              <Text style={styles.dropBody}>MP4 or MOV · up to 4K · chest rig, glasses, helmet</Text>
-            </>
-          ) : (
-            <>
-              <Text style={styles.dropTitle}>
-                {uploaded ? "Upload complete" : `Uploading… ${Math.round(progress * 100)}%`}
-              </Text>
-              <View style={{ width: "100%", marginTop: 14 }}>
-                <ProgressBar progress={progress} />
-              </View>
-              <Text style={styles.dropBody}>
-                {uploaded
-                  ? "day_full_pov.mp4 · 3.2 GB · transcoding queued"
-                  : "Keep this screen open while we push your file"}
-              </Text>
-            </>
-          )}
-        </View>
-      </PressableScale>
+      {/* ---- Upload zone ---- */}
+      <UploadZone
+        phase={phase}
+        progress={progress}
+        videoLabel={videoLabel}
+        error={error}
+        onPick={pickVideo}
+        onRecord={recordVideo}
+        onRetry={retryUpload}
+        onClear={clearVideo}
+      />
 
+      {/* ---- Metadata (always editable) ---- */}
       <Text style={styles.label}>Title</Text>
       <TextInput
         value={title}
@@ -161,7 +303,14 @@ export default function UploadScreen() {
       <Text style={styles.label}>Thumbnail</Text>
       <PressableScale onPress={pickThumb} scaleTo={0.98}>
         <View style={styles.thumbWrap}>
-          <Image source={{ uri: thumb }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          {thumb ? (
+            <Image source={{ uri: thumb }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          ) : (
+            <View style={styles.thumbPlaceholder}>
+              <Film size={20} color={Colors.textDim} />
+              <Text style={styles.thumbPlaceholderText}>Auto-generated by Mux · tap to override</Text>
+            </View>
+          )}
           <View style={styles.thumbOverlay}>
             <FilePlus2 size={15} color={Colors.ink} />
             <Text style={styles.thumbText}>Change thumbnail</Text>
@@ -239,9 +388,19 @@ export default function UploadScreen() {
 
       <View style={{ gap: 10, marginTop: 26 }}>
         <Button
-          label={uploaded ? "Publish now" : "Publish now (upload first)"}
-          disabled={!uploaded}
-          onPress={() => submit("published")}
+          label={
+            submitting
+              ? "Publishing…"
+              : canPublish
+                ? "Publish now"
+                : phase === "transcoding"
+                  ? "Processing video…"
+                  : phase === "uploading"
+                    ? "Uploading…"
+                    : "Pick a video first"
+          }
+          disabled={!canPublish || submitting}
+          onPress={() => void submit("published")}
         />
         <View style={{ flexDirection: "row", gap: 10 }}>
           <Button
@@ -249,10 +408,18 @@ export default function UploadScreen() {
             variant="dark"
             small
             icon={<Clock size={14} color={Colors.text} />}
-            onPress={() => submit("scheduled")}
+            disabled={!canPublish || submitting}
+            onPress={() => void submit("scheduled")}
             style={{ flex: 1 }}
           />
-          <Button label="Save draft" variant="ghost" small onPress={() => submit("draft")} style={{ flex: 1 }} />
+          <Button
+            label="Save draft"
+            variant="ghost"
+            small
+            disabled={!canPublish || submitting}
+            onPress={() => void submit("draft")}
+            style={{ flex: 1 }}
+          />
         </View>
       </View>
 
@@ -263,6 +430,119 @@ export default function UploadScreen() {
     </ScrollView>
   );
 }
+
+// ===========================================================================
+// Upload zone — choose / uploading / transcoding / ready / error
+// ===========================================================================
+
+function UploadZone({
+  phase,
+  progress,
+  videoLabel,
+  error,
+  onPick,
+  onRecord,
+  onRetry,
+  onClear,
+}: {
+  phase: Phase;
+  progress: number;
+  videoLabel: string;
+  error: string | null;
+  onPick: () => void;
+  onRecord: () => void;
+  onRetry: () => void;
+  onClear: () => void;
+}) {
+  if (phase === "error") {
+    return (
+      <View style={[styles.dropzone, { borderColor: Colors.danger, backgroundColor: "rgba(255,59,48,0.06)" }]}>
+        <View style={[styles.dropIcon, { backgroundColor: Colors.danger }]}>
+          <AlertCircle size={22} color="#fff" />
+        </View>
+        <Text style={styles.dropTitle}>Upload failed</Text>
+        <Text style={styles.dropBody}>{error ?? "Something went wrong."}</Text>
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 14 }}>
+          <Button label="Retry" small onPress={onRetry} />
+          <Button label="Cancel" variant="ghost" small onPress={onClear} />
+        </View>
+      </View>
+    );
+  }
+
+  if (phase === "uploading") {
+    return (
+      <View style={styles.dropzone}>
+        <View style={[styles.dropIcon, { backgroundColor: Colors.lime }]}>
+          <UploadCloud size={22} color={Colors.ink} />
+        </View>
+        <Text style={styles.dropTitle}>Uploading… {Math.round(progress * 100)}%</Text>
+        <View style={{ width: "100%", marginTop: 14 }}>
+          <ProgressBar progress={progress} />
+        </View>
+        <Text style={styles.dropBody}>
+          {videoLabel} · keep this screen open while we push your file
+        </Text>
+      </View>
+    );
+  }
+
+  if (phase === "transcoding") {
+    return (
+      <View style={styles.dropzone}>
+        <View style={[styles.dropIcon, { backgroundColor: Colors.cyan }]}>
+          <Loader size={22} color={Colors.ink} />
+        </View>
+        <Text style={styles.dropTitle}>Transcoding…</Text>
+        <Text style={styles.dropBody}>
+          Mux is processing your video into 4K, 1080p and 720p. This usually takes a minute.
+        </Text>
+      </View>
+    );
+  }
+
+  if (phase === "ready") {
+    return (
+      <View style={[styles.dropzone, { borderColor: Colors.lime, backgroundColor: "rgba(212,255,58,0.06)" }]}>
+        <View style={[styles.dropIcon, { backgroundColor: Colors.lime }]}>
+          <Check size={22} color={Colors.ink} />
+        </View>
+        <Text style={styles.dropTitle}>Video ready</Text>
+        <Text style={styles.dropBody}>{videoLabel} · processed and ready to publish</Text>
+        <Button label="Replace video" variant="ghost" small onPress={onClear} style={{ marginTop: 14 }} />
+      </View>
+    );
+  }
+
+  // choose
+  return (
+    <View style={styles.dropzone}>
+      <View style={styles.dropIcon}>
+        <Clapperboard size={22} color={Colors.ink} />
+      </View>
+      <Text style={styles.dropTitle}>Upload your POV footage</Text>
+      <Text style={styles.dropBody}>MP4 or MOV · up to 4K · chest rig, glasses, helmet</Text>
+      <View style={{ flexDirection: "row", gap: 10, marginTop: 16 }}>
+        <PressableScale onPress={onPick} scaleTo={0.96}>
+          <View style={styles.choiceBtn}>
+            <Video size={16} color={Colors.ink} />
+            <Text style={styles.choiceText}>Pick from library</Text>
+          </View>
+        </PressableScale>
+        <PressableScale onPress={onRecord} scaleTo={0.96}>
+          <View style={[styles.choiceBtn, { backgroundColor: Colors.surfaceHi }]}>
+            <Camera size={16} color={Colors.text} />
+            <Text style={[styles.choiceText, { color: Colors.text }]}>Record</Text>
+          </View>
+        </PressableScale>
+      </View>
+    </View>
+  );
+}
+
+// ===========================================================================
+// Helpers
+// ===========================================================================
 
 function AccessOption({
   icon,
@@ -318,6 +598,16 @@ const styles = StyleSheet.create({
   },
   dropTitle: { color: Colors.text, fontSize: 16, fontWeight: "900" },
   dropBody: { color: Colors.textDim, fontSize: 12, fontWeight: "600", marginTop: 7, textAlign: "center" },
+  choiceBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    backgroundColor: Colors.lime,
+    paddingHorizontal: 16,
+    height: 40,
+    borderRadius: Radius.pill,
+  },
+  choiceText: { color: Colors.ink, fontSize: 13, fontWeight: "900" },
   label: { ...microLabel, color: Colors.textDim, marginTop: 24, marginBottom: 9 },
   input: {
     minHeight: 52,
@@ -339,6 +629,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingBottom: 12,
   },
+  thumbPlaceholder: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: Colors.surface,
+  },
+  thumbPlaceholderText: { color: Colors.textDim, fontSize: 11, fontWeight: "600", textAlign: "center" },
   thumbOverlay: {
     flexDirection: "row",
     alignItems: "center",

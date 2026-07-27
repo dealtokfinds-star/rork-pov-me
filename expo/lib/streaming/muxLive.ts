@@ -60,8 +60,8 @@ export interface StreamAccessResult {
 }
 
 /** Response from stream-health. Real Mux metrics for the host dashboard. */
-export interface StreamHealth {
-  status: "idle" | "connecting" | "live" | "reconnecting" | "ended";
+export type StreamHealth = {
+  status: "idle" | "connecting" | "live" | "reconnecting" | "ended" | "error";
   muxStatus?: string;
   concurrentViewers: number;
   maxViewers: number;

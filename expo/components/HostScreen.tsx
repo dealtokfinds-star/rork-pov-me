@@ -1,40 +1,37 @@
 /**
  * HostScreen
  * ----------
- * The creator's live streaming surface. Renders a real `expo-camera` preview,
- * drives the `StreamSession` controller for health/reconnect/teardown, and
- * overlays streamer controls (mute, flip, torch, end) + live metrics +
- * the `ChatOverlay` for watching the room chat while broadcasting.
+ * The creator's live streaming surface — real Mux pipeline edition.
+ *
+ * Renders:
+ *  - A "Connect your encoder" card with the RTMP ingest URL + copyable stream
+ *    key (long-press to copy, haptic). For all sources (chest rig / phone /
+ *    desktop) the key is shown so an external encoder can connect.
+ *  - A local `CameraView` confidence monitor (labelled "local preview only")
+ *    so the creator can frame their shot. Expo Go can't push RTMP, so the
+ *    phone is the monitor while an encoder broadcasts.
+ *  - A live health panel pulling real Mux metrics via `stream-health` polling
+ *    every 5s (bitrate, resolution, viewers, dropped frames, status).
+ *  - The end-stream button wired to `endLiveStream(streamId)`, which finalizes
+ *    the Mux asset and auto-creates a replay episode.
  *
  * Memory & lifecycle:
- *  - The `CameraView` is only mounted while `health` is live/reconnecting so
- *    the native capture session is released the moment we end.
- *  - `StreamSession.dispose()` is called in the unmount effect, which stops
- *    recording, clears all timers, and detaches the camera ref.
- *  - The camera ref is reset to null on blur so a popped-but-not-unmounted
- *    screen (React Navigation) doesn't hold the capture session alive.
- *
- * Edge cases handled:
- *  - Permission denied / partial / no-camera → dedicated gate UI
- *  - Network drop mid-stream → reconnect banner with exponential backoff
- *  - Recording finalization → URI surfaced for replay upload
- *  - App blur / unmount → deterministic teardown
+ *  - The local `CameraView` confidence monitor is only mounted while live so
+ *    the native capture session is released when we end.
+ *  - Health polling is cleared on unmount and on end.
  */
 
-import { CameraView, type CameraType } from "expo-camera";
-import { useKeepAwake } from "expo-keep-awake";
+import { CameraView } from "expo-camera";
+import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import {
   AlertCircle,
-  CameraOff,
+  Check,
+  Copy,
   Eye,
-  FlipHorizontal2,
-  Mic,
-  MicOff,
+  Loader,
   Radio,
-  Settings2,
-  Sun,
-  Timer,
+  Server,
   WifiOff,
   X,
   Zap,
@@ -42,111 +39,76 @@ import {
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
-  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { ChatOverlay, type ChatOverlayHandle } from "@/components/ChatOverlay";
-import { Button, LiveBadge, PressableScale, Tag, haptic } from "@/components/ui";
+import { Button, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import { formatCount, formatMoney } from "@/constants/mock-data";
 import { useStreamingPermissions } from "@/lib/streaming/PermissionHandler";
 import {
-  StreamSession,
-  type CameraController,
-  type StreamSessionState,
-} from "@/lib/streaming/StreamSession";
+  endLiveStream,
+  getStreamHealth,
+  type StreamHealth,
+} from "@/lib/streaming/muxLive";
 import { useApp } from "@/providers/app-provider";
 import type { PovCategory, StreamAccess } from "@/types";
+
+type Source = "chest" | "phone" | "desktop";
 
 interface HostScreenProps {
   title: string;
   category: PovCategory;
   access: StreamAccess;
   ppvPrice?: number;
-  /** Called with the local recording URI when the stream ends cleanly. */
-  onStreamEnded?: (recordingUri: string | null) => void;
-  /** Optional session to inject (testing). Creates one if omitted. */
-  session?: StreamSession;
+  streamId: string | null;
+  rtmpUrl: string | null;
+  rtmpKey: string | null;
+  hlsUrl: string | null;
+  source: Source;
+  onStreamEnded?: () => void;
 }
+
+type HealthState = "connecting" | "live" | "reconnecting" | "ended" | "error";
+
+const HEALTH_POLL_MS = 5_000;
 
 export default function HostScreen({
   title,
   category,
   access,
   ppvPrice,
+  streamId,
+  rtmpUrl,
+  rtmpKey,
+  source,
   onStreamEnded,
 }: HostScreenProps): React.ReactElement {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { displayName, balance, tip } = useApp();
-  useKeepAwake("povme-host");
+  const { displayName, balance } = useApp();
 
-  // ---- permissions ---------------------------------------------------------
-
-  // `hasCamera` would be false on a web build with no webcam; on native we
-  // assume a camera exists and let the permission flow handle the rest.
   const { state: permState, request: requestPermissions } =
     useStreamingPermissions(true);
 
-  // ---- session + camera ----------------------------------------------------
-
-  const sessionRef = useRef<StreamSession | null>(null);
-  if (sessionRef.current === null) {
-    sessionRef.current = new StreamSession({
-      simulateNetworkDrops: true,
-      initialViewers: 0,
-      onRecordingComplete: (uri) => {
-        console.log("[povme] recording ready for replay upload:", uri);
-      },
-    });
-  }
-  const session = sessionRef.current;
-
-  const cameraRef = useRef<CameraView | null>(null);
-  const chatRef = useRef<ChatOverlayHandle>(null);
-  const [sessionState, setSessionState] = useState<StreamSessionState>(
-    session.getState(),
-  );
-  const [torchOn, setTorchOn] = useState<boolean>(false);
-  const [showChat, setShowChat] = useState<boolean>(true);
+  const [healthState, setHealthState] = useState<HealthState>("connecting");
+  const [health, setHealth] = useState<StreamHealth | null>(null);
+  const [elapsedSec, setElapsedSec] = useState<number>(0);
+  const [earned, setEarned] = useState<number>(0);
+  const [ending, setEnding] = useState<boolean>(false);
+  const [endError, setEndError] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState<boolean>(false);
+  const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
   const pulse = useRef(new Animated.Value(0)).current;
 
-  // Subscribe to session state changes.
+  // ---- ON-AIR pulse ----
   useEffect(() => {
-    const unsub = session.subscribe(setSessionState);
-    return unsub;
-  }, [session]);
-
-  // Attach the camera controller adapter so the session can drive recording.
-  useEffect(() => {
-    if (!cameraRef.current) return;
-    const controller: CameraController = {
-      stopRecording: () => cameraRef.current?.stopRecording(),
-      recordAsync: (opts) =>
-        cameraRef.current?.recordAsync({
-          maxDuration: 60 * 60,
-        }) as Promise<{ uri: string } | undefined>,
-      pausePreview: async () => {
-        await cameraRef.current?.pausePreview();
-      },
-      resumePreview: async () => {
-        await cameraRef.current?.resumePreview();
-      },
-    };
-    session.attachCamera(controller);
-    return () => {
-      session.attachCamera(null);
-    };
-  }, [session, sessionState.health]);
-
-  // ON-AIR pulse animation.
-  useEffect(() => {
-    if (sessionState.health !== "live") return;
+    if (healthState !== "live") return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
@@ -155,152 +117,130 @@ export default function HostScreen({
     );
     loop.start();
     return () => loop.stop();
-  }, [sessionState.health, pulse]);
+  }, [healthState, pulse]);
 
-  // ---- teardown on unmount -------------------------------------------------
-
+  // ---- real health polling ----
   useEffect(() => {
-    return () => {
-      // Deterministic cleanup: stop recording, clear timers, drop listeners.
-      session.dispose();
+    if (!streamId) return;
+    let cancelled = false;
+
+    const poll = async (): Promise<void> => {
+      if (cancelled) return;
+      try {
+        const h = await getStreamHealth(streamId);
+        if (cancelled) return;
+        setHealth(h);
+        setHealthState(
+          h.status === "live" ? "live"
+          : h.status === "reconnecting" ? "reconnecting"
+          : h.status === "ended" ? "ended"
+          : h.status === "error" ? "error"
+          : "connecting",
+        );
+        setElapsedSec(h.elapsedSec);
+      } catch (err) {
+        console.log("[povme] health poll error", err);
+      }
     };
-  }, [session]);
 
-  // ---- actions -------------------------------------------------------------
+    poll();
+    const interval = setInterval(poll, HEALTH_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [streamId]);
 
-  const goLive = useCallback(async () => {
-    const result = await requestPermissions();
-    if (!result.ok) {
-      haptic("heavy");
-      return;
-    }
+  // ---- copy RTMP key / URL ----
+  const copyKey = useCallback(async (): Promise<void> => {
+    if (!rtmpKey) return;
+    await Clipboard.setStringAsync(rtmpKey);
+    setCopiedKey(true);
     haptic("success");
-    session.start();
-  }, [requestPermissions, session]);
+    setTimeout(() => setCopiedKey(false), 2000);
+  }, [rtmpKey]);
 
-  const endStream = useCallback(async () => {
+  const copyUrl = useCallback(async (): Promise<void> => {
+    if (!rtmpUrl) return;
+    await Clipboard.setStringAsync(rtmpUrl);
+    setCopiedUrl(true);
+    haptic("success");
+    setTimeout(() => setCopiedUrl(false), 2000);
+  }, [rtmpUrl]);
+
+  // ---- end stream ----
+  const endStream = useCallback(async (): Promise<void> => {
+    if (ending) return;
+    setEnding(true);
+    setEndError(null);
     haptic("heavy");
-    const uri = await session.stop();
-    onStreamEnded?.(uri);
-    router.replace("/(tabs)/studio");
-  }, [session, onStreamEnded, router]);
+    try {
+      if (streamId) {
+        await endLiveStream(streamId, `Replay: ${title}`);
+      }
+      setHealthState("ended");
+      onStreamEnded?.();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Could not end the stream.";
+      setEndError(friendly(msg));
+      setEnding(false);
+    }
+  }, [ending, streamId, title, onStreamEnded]);
 
-  const toggleMute = useCallback(() => {
-    const muted = session.toggleMute();
-    haptic(muted ? "medium" : "light");
-  }, [session]);
-
-  const flipCamera = useCallback(() => {
-    const front = session.flipCamera();
-    // expo-camera reads `facing` from prop on the next render — no extra call.
-    haptic("medium");
-  }, [session]);
-
-  const toggleTorch = useCallback(() => {
-    setTorchOn((v) => !v);
-    haptic("light");
-  }, []);
-
-  const sendTip = useCallback(
-    (amount: number, label?: string) => {
-      // Hosts don't tip themselves, but the overlay still exercises the flow.
-      void amount;
-      void label;
-    },
-    [],
-  );
-
-  // ---- permission gate -----------------------------------------------------
-
-  if (permState.status !== "granted") {
+  // ---- permission gate ----
+  if (permState.status !== "granted" && source === "phone") {
     return (
       <PermissionGate
         status={permState.status}
         message={permState.message}
         insets={insets}
-        onRequest={goLive}
+        onRequest={async () => {
+          const result = await requestPermissions();
+          if (!result.ok) haptic("heavy");
+        }}
         onClose={() => router.back()}
       />
     );
   }
 
-  // ---- connecting / live / reconnecting / ended ----------------------------
-
-  const { health, metrics, muted, facingFront, error, reconnectAttempts } =
-    sessionState;
-  const mins = Math.floor(metrics.elapsedSec / 60);
-  const secs = metrics.elapsedSec % 60;
-  const isLive = health === "live";
-  const isReconnecting = health === "reconnecting";
-  const isConnecting = health === "connecting";
-  const isEnded = health === "ended";
-
-  // Camera is only mounted while we have (or are about to have) an active
-  // capture session. This prevents holding the camera open on the gate screen.
-  const cameraActive = isLive || isReconnecting || isConnecting;
+  const mins = Math.floor(elapsedSec / 60);
+  const secs = elapsedSec % 60;
+  const isLive = healthState === "live";
+  const isConnecting = healthState === "connecting";
+  const isReconnecting = healthState === "reconnecting";
+  const isEnded = healthState === "ended";
+  const viewers = health?.concurrentViewers ?? 0;
+  const maxViewers = health?.maxViewers ?? 0;
+  const bitrateKbps = health?.peakBitrateKbps ?? 0;
 
   return (
-    <View style={styles.screen}>
-      {cameraActive ? (
-        <CameraView
-          ref={cameraRef}
-          style={StyleSheet.absoluteFill}
-          facing={facingFront ? "front" : "back"}
-          mode="video"
-          mute={muted}
-          enableTorch={torchOn}
-          videoQuality="1080p"
-          videoStabilizationMode="auto"
-          active={isLive}
-          mirror={facingFront}
-          onMountError={(e) => {
-            console.log("[povme] camera mount error", e.message);
-          }}
-        />
-      ) : null}
-
-      {/* Dim scrim for control legibility */}
-      <View
-        style={[
-          StyleSheet.absoluteFill,
-          { backgroundColor: isEnded ? Colors.ink : "rgba(8,8,10,0.25)" },
-        ]}
-        pointerEvents="none"
-      />
-
+    <ScrollView style={styles.screen} contentContainerStyle={{ paddingTop: insets.top + 10, paddingBottom: insets.bottom + 20, paddingHorizontal: 16 }}>
       {/* ---- top bar ---- */}
-      <View style={[styles.topBar, { paddingTop: insets.top + 10 }]}>
-        <View style={styles.topLeft}>
-          <Animated.View
-            style={[
-              styles.onAirPill,
-              {
-                opacity: isLive
-                  ? pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 0.55] })
-                  : 1,
-              },
-            ]}
-          >
-            <Radio size={12} color="#fff" />
-            <Text style={styles.onAirText}>
-              {isLive ? "ON AIR" : isConnecting ? "CONNECTING" : isReconnecting ? "RECONNECT" : "ENDED"}
-            </Text>
-          </Animated.View>
-          <View style={styles.viewerPill}>
-            <Eye size={11} color="#fff" />
-            <Text style={styles.viewerText}>{formatCount(metrics.viewers)}</Text>
-          </View>
+      <View style={styles.topBar}>
+        <Animated.View
+          style={[
+            styles.onAirPill,
+            { opacity: isLive ? pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 0.55] }) : 1 },
+          ]}
+        >
+          <Radio size={12} color="#fff" />
+          <Text style={styles.onAirText}>
+            {isLive ? "ON AIR" : isConnecting ? "CONNECTING" : isReconnecting ? "RECONNECT" : isEnded ? "ENDED" : "ERROR"}
+          </Text>
+        </Animated.View>
+        <View style={styles.viewerPill}>
+          <Eye size={11} color="#fff" />
+          <Text style={styles.viewerText}>{formatCount(viewers)}</Text>
         </View>
-
-        <PressableScale onPress={() => router.back()} scaleTo={0.9}>
+        <PressableScale onPress={() => router.back()} scaleTo={0.9} style={{ marginLeft: "auto" }}>
           <View style={styles.closeCircle}>
             <X size={18} color={Colors.text} />
           </View>
         </PressableScale>
       </View>
 
-      {/* ---- stream title + category ---- */}
-      <View style={[styles.titleBlock, { top: insets.top + 58 }]}>
+      {/* ---- stream title + tags ---- */}
+      <View style={styles.titleBlock}>
         <Text style={styles.streamTitle} numberOfLines={2}>
           {title || "Untitled POV stream"}
         </Text>
@@ -311,98 +251,35 @@ export default function HostScreen({
             bg={access === "ppv" ? Colors.cyan : Colors.lime}
           />
           <Tag label={category.toUpperCase()} color={Colors.text} bg="rgba(0,0,0,0.55)" />
+          <Tag label={source === "chest" ? "CHEST RIG" : source === "phone" ? "PHONE" : "DESKTOP"} color={Colors.text} bg="rgba(0,0,0,0.55)" />
         </View>
       </View>
 
       {/* ---- reconnect / error banner ---- */}
-      {(isReconnecting || health === "error") && error ? (
-        <View style={[styles.banner, { top: insets.top + 130 }]}>
+      {(isReconnecting || healthState === "error") && (
+        <View style={styles.banner}>
           {isReconnecting ? <WifiOff size={13} color={Colors.ink} /> : <AlertCircle size={13} color={Colors.ink} />}
-          <Text style={styles.bannerText}>{error}</Text>
-          {reconnectAttempts > 0 ? (
-            <Text style={styles.bannerAttempt}>#{reconnectAttempts}</Text>
-          ) : null}
+          <Text style={styles.bannerText}>
+            {isReconnecting ? "Encoder disconnected — waiting for reconnect window…" : "Stream error. Check your encoder and try again."}
+          </Text>
         </View>
-      ) : null}
-
-      {/* ---- live metrics (host dashboard) ---- */}
-      {isLive || isReconnecting ? (
-        <View style={[styles.metricsRow, { bottom: insets.bottom + 230 }]}>
-          <MetricTile icon={<Timer size={12} color={Colors.lime} />} label="Time" value={`${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`} />
-          <MetricTile icon={<Eye size={12} color={Colors.lime} />} label="Viewers" value={formatCount(metrics.viewers)} />
-          <MetricTile icon={<Zap size={12} color={Colors.lime} />} label="Bitrate" value={`${(metrics.bitrateKbps / 1000).toFixed(1)}mb`} />
-          <MetricTile icon={<Radio size={12} color={Colors.gold} />} label="Earned" value={formatMoney(metrics.grossEarned)} accent={Colors.gold} />
-        </View>
-      ) : null}
-
-      {/* ---- chat overlay (toggleable) ---- */}
-      {showChat && (isLive || isReconnecting) ? (
-        <View style={styles.chatLayer}>
-          <ChatOverlay
-            ref={chatRef}
-            simulateIncoming
-            incomingIntervalMs={2600}
-            maxMessages={60}
-            displayName={displayName}
-            onSendTip={sendTip}
-            walletBalance={balance}
-          />
-        </View>
-      ) : null}
-
-      {/* ---- bottom control deck ---- */}
-      <View style={[styles.controls, { paddingBottom: insets.bottom + 16 }]}>
-        <View style={styles.controlRow}>
-          <ControlButton
-            icon={muted ? <MicOff size={22} color="#fff" /> : <Mic size={22} color="#fff" />}
-            label={muted ? "Muted" : "Mic"}
-            active={muted}
-            onPress={toggleMute}
-          />
-          <ControlButton
-            icon={<FlipHorizontal2 size={22} color="#fff" />}
-            label="Flip"
-            onPress={flipCamera}
-          />
-          <ControlButton
-            icon={<Sun size={22} color={torchOn ? Colors.gold : "#fff"} />}
-            label="Torch"
-            active={torchOn}
-            onPress={toggleTorch}
-          />
-          <ControlButton
-            icon={<Eye size={22} color="#fff" />}
-            label={showChat ? "Chat on" : "Chat off"}
-            active={showChat}
-            onPress={() => setShowChat((v) => !v)}
-          />
-        </View>
-
-        <View style={styles.endRow}>
-          <PressableScale onPress={endStream} scaleTo={0.94} disabled={!isLive && !isReconnecting}>
-            <View style={styles.endButton}>
-              <Radio size={16} color="#fff" />
-              <Text style={styles.endText}>End stream</Text>
-            </View>
-          </PressableScale>
-        </View>
-      </View>
+      )}
 
       {/* ---- ended overlay ---- */}
       {isEnded ? (
-        <View style={[styles.endedOverlay, { paddingTop: insets.top + 80 }]}>
+        <View style={styles.endedCard}>
           <View style={styles.endedIcon}>
-            <Radio size={28} color={Colors.magenta} />
+            <Check size={28} color={Colors.lime} />
           </View>
           <Text style={styles.endedTitle}>Stream ended</Text>
           <Text style={styles.endedBody}>
-            {sessionState.recordingUri
-              ? "Your replay was saved. You can publish it from Studio."
-              : "No recording was captured. You can go live again anytime."}
+            {health?.activeAssetId
+              ? "Your replay is being processed and will publish to your feed shortly."
+              : "The stream has ended. Your replay will publish once Mux finalizes it."}
           </Text>
           <View style={styles.endedStats}>
-            <EndedStat label="Peak viewers" value={formatCount(metrics.viewers)} />
-            <EndedStat label="Gross earned" value={formatMoney(metrics.grossEarned)} />
+            <EndedStat label="Peak viewers" value={formatCount(maxViewers)} />
+            <EndedStat label="Duration" value={`${mins}:${secs.toString().padStart(2, "0")}`} />
           </View>
           <Button
             label="Back to Studio"
@@ -411,8 +288,133 @@ export default function HostScreen({
             style={{ marginTop: 24 }}
           />
         </View>
-      ) : null}
-    </View>
+      ) : (
+        <>
+          {/* ---- RTMP encoder connect card ---- */}
+          <View style={styles.encoderCard}>
+            <View style={styles.encoderHeader}>
+              <Server size={15} color={Colors.lime} />
+              <Text style={styles.encoderTitle}>Connect your encoder</Text>
+            </View>
+            <Text style={styles.encoderHint}>
+              {source === "phone"
+                ? "Expo Go can't push RTMP — use this key in OBS / Streamlabs / your chest rig. This phone is your monitor."
+                : "Paste these into OBS, Streamlabs, or your chest rig's RTMP settings."}
+            </Text>
+
+            <View style={styles.rtmpRow}>
+              <Text style={styles.rtmpLabel}>RTMP URL</Text>
+              <Pressable onLongPress={copyUrl}>
+                <View style={styles.rtmpValueWrap}>
+                  <Text style={styles.rtmpValue} numberOfLines={1} selectable>
+                    {rtmpUrl ?? "—"}
+                  </Text>
+                  <PressableScale onPress={copyUrl} scaleTo={0.9}>
+                    <View style={[styles.copyBtn, copiedUrl && { backgroundColor: Colors.lime }]}>
+                      {copiedUrl ? <Check size={12} color={Colors.ink} /> : <Copy size={12} color={Colors.text} />}
+                    </View>
+                  </PressableScale>
+                </View>
+              </Pressable>
+            </View>
+
+            <View style={styles.rtmpRow}>
+              <Text style={styles.rtmpLabel}>Stream key</Text>
+              <Pressable onLongPress={copyKey}>
+                <View style={styles.rtmpValueWrap}>
+                  <Text style={styles.rtmpValue} numberOfLines={1} selectable>
+                    {rtmpKey ? `${rtmpKey.slice(0, 8)}••••••••` : "—"}
+                  </Text>
+                  <PressableScale onPress={copyKey} scaleTo={0.9}>
+                    <View style={[styles.copyBtn, copiedKey && { backgroundColor: Colors.lime }]}>
+                      {copiedKey ? <Check size={12} color={Colors.ink} /> : <Copy size={12} color={Colors.text} />}
+                    </View>
+                  </PressableScale>
+                </View>
+              </Pressable>
+            </View>
+            <Text style={styles.rtmpNote}>Long-press to reveal · tap the copy icon</Text>
+          </View>
+
+          {/* ---- local camera confidence monitor (phone source) ---- */}
+          {source === "phone" && permState.status === "granted" && !isEnded ? (
+            <View style={styles.monitorCard}>
+              <View style={styles.monitorLabel}>
+                <Eye size={11} color={Colors.textDim} />
+                <Text style={styles.monitorLabelText}>LOCAL PREVIEW ONLY · not broadcasting</Text>
+              </View>
+              <View style={styles.monitorWrap}>
+                <CameraView
+                  style={StyleSheet.absoluteFill}
+                  facing="front"
+                  mode="video"
+                  active={isLive || isConnecting}
+                  mirror
+                  videoQuality="1080p"
+                  onMountError={(e) => console.log("[povme] camera mount error", e.message)}
+                />
+              </View>
+            </View>
+          ) : null}
+
+          {/* ---- live health panel ---- */}
+          <View style={styles.healthSection}>
+            <Text style={styles.kicker}>Stream health</Text>
+            <View style={styles.healthCard}>
+              <HealthRow
+                label="Status"
+                value={
+                  isLive ? "Live" : isConnecting ? "Connecting" : isReconnecting ? "Reconnecting" : "Idle"
+                }
+                ok={isLive}
+              />
+              <HealthRow label="Viewers" value={formatCount(viewers)} ok={isLive} />
+              <HealthRow label="Peak viewers" value={formatCount(maxViewers)} ok />
+              <HealthRow
+                label="Bitrate"
+                value={bitrateKbps > 0 ? `${(bitrateKbps / 1000).toFixed(1)} mbps` : "—"}
+                ok={bitrateKbps > 0}
+              />
+              <HealthRow
+                label="Duration"
+                value={`${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`}
+                ok
+              />
+              <HealthRow
+                label="Latency mode"
+                value={health?.latencyMode ?? "low"}
+                ok
+              />
+              <HealthRow
+                label="Dropped frames"
+                value={`${(health?.droppedFramesPct ?? 0).toFixed(1)}%`}
+                ok={(health?.droppedFramesPct ?? 0) < 2}
+              />
+            </View>
+          </View>
+
+          {/* ---- end stream ---- */}
+          {endError ? (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorText}>{endError}</Text>
+            </View>
+          ) : null}
+          <Button
+            label={ending ? "Ending…" : "End stream"}
+            variant="live"
+            icon={ending ? <Loader size={16} color="#fff" /> : <Radio size={16} color="#fff" />}
+            disabled={ending || isEnded}
+            onPress={() => void endStream()}
+            style={{ marginTop: 20 }}
+          />
+          <Text style={styles.legal}>
+            {isLive
+              ? "Ending the stream finalizes the Mux asset and auto-publishes a replay to your feed."
+              : "Tap end stream to finalize the broadcast and create the replay."}
+          </Text>
+        </>
+      )}
+    </ScrollView>
   );
 }
 
@@ -433,8 +435,8 @@ function PermissionGate({
   onRequest: () => void;
   onClose: () => void;
 }) {
-  const isUnavailable = status === "unavailable";
   const isDenied = status === "denied";
+  const isUnavailable = status === "unavailable";
 
   return (
     <View style={[styles.gateScreen, { paddingTop: insets.top + 24 }]}>
@@ -443,110 +445,36 @@ function PermissionGate({
           <X size={18} color={Colors.text} />
         </View>
       </PressableScale>
-
       <View style={styles.gateBody}>
-        <View style={[styles.gateIcon, isUnavailable && { backgroundColor: Colors.surfaceHi }]}>
-          {isUnavailable ? (
-            <CameraOff size={26} color={Colors.textDim} />
-          ) : (
-            <Radio size={26} color={Colors.ink} />
-          )}
+        <View style={styles.gateIcon}>
+          <Radio size={26} color={Colors.ink} />
         </View>
-
         <Text style={styles.gateTitle}>
-          {isUnavailable
-            ? "No camera available"
-            : isDenied
-              ? "Permissions blocked"
-              : status === "partial"
-                ? "One more permission"
-                : "Ready to go live?"}
+          {isUnavailable ? "No camera available" : isDenied ? "Permissions blocked" : "Ready to monitor?"}
         </Text>
-
         <Text style={styles.gateMessage}>{message}</Text>
-
-        {!isUnavailable ? (
-          <>
-            <View style={styles.permChecklist}>
-              <PermRow label="Camera" granted={false} />
-              <PermRow label="Microphone" granted={false} />
-            </View>
-            <Button
-              label={isDenied ? "Open Settings" : "Allow camera & mic"}
-              variant="live"
-              onPress={onRequest}
-              style={{ marginTop: 22 }}
-            />
-            {isDenied ? (
-              <Text style={styles.gateHint}>
-                POVMe needs both camera and microphone to broadcast your POV.
-              </Text>
-            ) : null}
-          </>
-        ) : (
-          <Text style={styles.gateHint}>
-            Live streaming requires a device with a camera. Try POVMe on your phone.
-          </Text>
-        )}
+        <Button
+          label={isDenied ? "Open Settings" : "Allow camera & mic"}
+          variant="live"
+          onPress={onRequest}
+          style={{ marginTop: 22 }}
+        />
       </View>
     </View>
   );
 }
 
-function PermRow({ label, granted }: { label: string; granted: boolean }) {
-  return (
-    <View style={styles.permRow}>
-      <View style={[styles.permDot, { backgroundColor: granted ? Colors.lime : Colors.borderHi }]} />
-      <Text style={styles.permLabel}>{label}</Text>
-      <Text style={[styles.permStatus, { color: granted ? Colors.lime : Colors.textDim }]}>
-        {granted ? "Granted" : "Required"}
-      </Text>
-    </View>
-  );
-}
-
 // ===========================================================================
-// Small presentational helpers
+// Small helpers
 // ===========================================================================
 
-function MetricTile({
-  icon,
-  label,
-  value,
-  accent = Colors.text,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  accent?: string;
-}) {
+function HealthRow({ label, value, ok }: { label: string; value: string; ok: boolean }) {
   return (
-    <View style={styles.metricTile}>
-      {icon}
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={[styles.metricValue, { color: accent }]}>{value}</Text>
+    <View style={styles.healthRow}>
+      <View style={[styles.healthDot, { backgroundColor: ok ? Colors.success : Colors.danger }]} />
+      <Text style={styles.healthLabel}>{label}</Text>
+      <Text style={styles.healthValue}>{value}</Text>
     </View>
-  );
-}
-
-function ControlButton({
-  icon,
-  label,
-  onPress,
-  active,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onPress: () => void;
-  active?: boolean;
-}) {
-  return (
-    <PressableScale onPress={onPress} scaleTo={0.9} style={styles.controlBtnWrap}>
-      <View style={[styles.controlBtn, active && { backgroundColor: Colors.magenta }]}>
-        {icon}
-      </View>
-      <Text style={styles.controlLabel}>{label}</Text>
-    </PressableScale>
   );
 }
 
@@ -559,24 +487,28 @@ function EndedStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+function friendly(msg: string): string {
+  if (msg.includes("Failed to fetch") || msg.includes("Network request failed")) {
+    return "Network error. Check your connection and try again.";
+  }
+  if (msg.includes("exp") && msg.includes("claim")) {
+    return "Your session expired. Please sign in again.";
+  }
+  return msg;
+}
+
 // ===========================================================================
 // Styles
 // ===========================================================================
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Colors.ink },
+  screen: { flex: 1, backgroundColor: Colors.bg },
   topBar: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 14,
-    zIndex: 10,
+    gap: 8,
+    marginBottom: 14,
   },
-  topLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
   onAirPill: {
     flexDirection: "row",
     alignItems: "center",
@@ -601,25 +533,20 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: "rgba(255,255,255,0.1)",
     alignItems: "center",
     justifyContent: "center",
   },
-  titleBlock: { position: "absolute", left: 14, right: 80, gap: 8 },
+  titleBlock: { gap: 8, marginBottom: 16 },
   streamTitle: {
     color: Colors.text,
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "900",
     letterSpacing: -0.5,
-    lineHeight: 23,
-    textShadowColor: "rgba(0,0,0,0.7)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
+    lineHeight: 24,
   },
-  tagRow: { flexDirection: "row", gap: 6 },
+  tagRow: { flexDirection: "row", gap: 6, flexWrap: "wrap" },
   banner: {
-    position: "absolute",
-    alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
     gap: 7,
@@ -627,88 +554,118 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: Radius.pill,
-    zIndex: 8,
+    marginBottom: 16,
   },
-  bannerText: { color: Colors.ink, fontSize: 12.5, fontWeight: "900" },
-  bannerAttempt: { color: Colors.ink, fontSize: 11, fontWeight: "800", opacity: 0.6 },
-  metricsRow: {
-    position: "absolute",
-    left: 12,
-    right: 12,
-    flexDirection: "row",
-    gap: 8,
-    zIndex: 5,
-  },
-  metricTile: {
-    flex: 1,
-    backgroundColor: "rgba(8,8,10,0.7)",
+  bannerText: { color: Colors.ink, fontSize: 12.5, fontWeight: "900", flex: 1 },
+  kicker: { ...microLabel, color: Colors.lime, marginBottom: 10 },
+
+  // encoder card
+  encoderCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    borderRadius: Radius.md,
-    padding: 10,
-    gap: 4,
+    borderColor: Colors.border,
+    padding: 18,
+    marginBottom: 16,
+    gap: 12,
   },
-  metricLabel: { color: Colors.textDim, ...microLabel, fontSize: 9 },
-  metricValue: { fontSize: 15, fontWeight: "900", letterSpacing: -0.4 },
-  chatLayer: { flex: 1, justifyContent: "flex-end" },
-  controls: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(8,8,10,0.88)",
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.08)",
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    zIndex: 9,
-  },
-  controlRow: {
+  encoderHeader: { flexDirection: "row", alignItems: "center", gap: 7 },
+  encoderTitle: { color: Colors.text, fontSize: 15, fontWeight: "900" },
+  encoderHint: { color: Colors.textDim, fontSize: 12, fontWeight: "600", lineHeight: 17 },
+  rtmpRow: { gap: 6 },
+  rtmpLabel: { ...microLabel, color: Colors.textDim, fontSize: 9.5 },
+  rtmpValueWrap: {
     flexDirection: "row",
-    justifyContent: "space-around",
-    marginBottom: 14,
+    alignItems: "center",
+    backgroundColor: Colors.bg,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    gap: 8,
   },
-  controlBtnWrap: { alignItems: "center", gap: 5 },
-  controlBtn: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: "rgba(255,255,255,0.12)",
+  rtmpValue: { flex: 1, color: Colors.text, fontSize: 12.5, fontWeight: "700" },
+  copyBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: Colors.surfaceHi,
     alignItems: "center",
     justifyContent: "center",
   },
-  controlLabel: { color: Colors.textMid, fontSize: 10.5, fontWeight: "700" },
-  endRow: { alignItems: "center", paddingBottom: 4 },
-  endButton: {
+  rtmpNote: { color: Colors.textDim, fontSize: 10.5, fontWeight: "600", marginTop: 2 },
+
+  // monitor
+  monitorCard: {
+    borderRadius: Radius.lg,
+    overflow: "hidden",
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: 16,
+  },
+  monitorLabel: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    height: 50,
-    paddingHorizontal: 28,
-    borderRadius: Radius.pill,
-    backgroundColor: Colors.magenta,
+    gap: 6,
+    padding: 10,
+    backgroundColor: "rgba(0,0,0,0.4)",
   },
-  endText: { color: "#fff", fontSize: 15, fontWeight: "900" },
+  monitorLabelText: { color: Colors.textDim, fontSize: 9.5, fontWeight: "800", letterSpacing: 0.5 },
+  monitorWrap: { height: 220, backgroundColor: Colors.ink },
 
-  // ended overlay
-  endedOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(8,8,10,0.96)",
+  // health
+  healthSection: { marginBottom: 16 },
+  healthCard: {
+    borderRadius: Radius.md,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: "hidden",
+  },
+  healthRow: {
+    flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 28,
-    zIndex: 20,
+    gap: 11,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+  },
+  healthDot: { width: 8, height: 8, borderRadius: 4 },
+  healthLabel: { flex: 1, color: Colors.text, fontSize: 13, fontWeight: "700" },
+  healthValue: { color: Colors.textMid, fontSize: 12.5, fontWeight: "800" },
+
+  // end
+  errorBanner: {
+    padding: 14,
+    borderRadius: Radius.md,
+    backgroundColor: "rgba(255,59,48,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,59,48,0.3)",
+    marginBottom: 12,
+  },
+  errorText: { color: Colors.danger, fontSize: 13, fontWeight: "700" },
+  legal: { color: Colors.textDim, fontSize: 11, fontWeight: "600", lineHeight: 17, marginTop: 14 },
+
+  // ended
+  endedCard: {
+    alignItems: "center",
+    padding: 24,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginTop: 20,
   },
   endedIcon: {
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: "rgba(255,45,111,0.18)",
+    backgroundColor: "rgba(212,255,58,0.18)",
     borderWidth: 1,
-    borderColor: "rgba(255,45,111,0.4)",
+    borderColor: "rgba(212,255,58,0.4)",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 18,
@@ -722,10 +679,10 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 10,
   },
-  endedStats: { flexDirection: "row", gap: 12, marginTop: 24 },
+  endedStats: { flexDirection: "row", gap: 12, marginTop: 24, width: "100%" },
   endedStat: {
     flex: 1,
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.bg,
     borderRadius: Radius.md,
     padding: 14,
     borderWidth: 1,
@@ -734,18 +691,10 @@ const styles = StyleSheet.create({
   endedStatLabel: { ...microLabel, color: Colors.textDim, fontSize: 9.5, marginBottom: 7 },
   endedStatValue: { color: Colors.text, fontSize: 19, fontWeight: "900", letterSpacing: -0.5 },
 
-  // permission gate
-  gateScreen: {
-    flex: 1,
-    backgroundColor: Colors.bg,
-  },
+  // gate
+  gateScreen: { flex: 1, backgroundColor: Colors.bg },
   gateClose: { position: "absolute", top: 0, right: 14, zIndex: 5 },
-  gateBody: {
-    flex: 1,
-    justifyContent: "center",
-    paddingHorizontal: 28,
-    paddingBottom: 60,
-  },
+  gateBody: { flex: 1, justifyContent: "center", paddingHorizontal: 28, paddingBottom: 60 },
   gateIcon: {
     width: 60,
     height: 60,
@@ -755,45 +704,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 22,
   },
-  gateTitle: {
-    color: Colors.text,
-    fontSize: 26,
-    fontWeight: "900",
-    letterSpacing: -0.8,
-    marginBottom: 12,
-  },
-  gateMessage: {
-    color: Colors.textMid,
-    fontSize: 14.5,
-    fontWeight: "500",
-    lineHeight: 22,
-    marginBottom: 18,
-  },
-  permChecklist: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    overflow: "hidden",
-  },
-  permRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  permDot: { width: 8, height: 8, borderRadius: 4 },
-  permLabel: { flex: 1, color: Colors.text, fontSize: 14, fontWeight: "800" },
-  permStatus: { fontSize: 12, fontWeight: "800" },
-  gateHint: {
-    color: Colors.textDim,
-    fontSize: 12,
-    fontWeight: "600",
-    lineHeight: 18,
-    marginTop: 14,
-    textAlign: "center",
-  },
+  gateTitle: { color: Colors.text, fontSize: 26, fontWeight: "900", letterSpacing: -0.8, marginBottom: 12 },
+  gateMessage: { color: Colors.textMid, fontSize: 14.5, fontWeight: "500", lineHeight: 22 },
 });

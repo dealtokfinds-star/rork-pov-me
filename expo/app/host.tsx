@@ -1,7 +1,7 @@
 /**
- * host.tsx — real camera broadcast surface.
- * Launched from golive.tsx when the creator picks "This phone" as the source.
- * Renders HostScreen with the stream config passed via search params.
+ * host.tsx — real broadcast surface.
+ * Launched from golive.tsx after a real Mux Live Stream is provisioned.
+ * Renders HostScreen with the stream config + RTMP key passed via search params.
  */
 
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -18,6 +18,11 @@ export default function HostRoute(): React.ReactElement | null {
     category: string;
     access: string;
     ppvPrice: string;
+    streamId: string;
+    rtmpUrl: string;
+    rtmpKey: string;
+    hlsUrl: string;
+    source: string;
   }>();
 
   const category = (
@@ -32,8 +37,12 @@ export default function HostRoute(): React.ReactElement | null {
       category={category}
       access={access}
       ppvPrice={ppvPrice}
+      streamId={params.streamId ?? null}
+      rtmpUrl={params.rtmpUrl ?? null}
+      rtmpKey={params.rtmpKey ?? null}
+      hlsUrl={params.hlsUrl ?? null}
+      source={(params.source ?? "chest") as "chest" | "phone" | "desktop"}
       onStreamEnded={() => {
-        // Could route to a replay-publish flow; for now head back to Studio.
         router.replace("/(tabs)/studio");
       }}
     />
