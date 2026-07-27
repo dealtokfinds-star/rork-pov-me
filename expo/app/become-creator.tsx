@@ -105,6 +105,9 @@ export default function BecomeCreatorScreen() {
         if (state.payoutMethod === "paypal" && state.payoutPaypalEmail) {
           setPaypalEmail(state.payoutPaypalEmail);
         }
+        // Jump to the publish/profile stage. The profile stage now includes
+        // editable identity + categories + price inputs, so even a returning
+        // creator with a missing identity tag can complete it there.
         setStage("profile");
         setStep(3);
       } else if (state.kycStatus === "verified") {
@@ -485,6 +488,52 @@ export default function BecomeCreatorScreen() {
                   <Text style={styles.doneTextDim}>Identity not verified — add it any time</Text>
                 </View>
               )}
+
+              {/* Editable profile fields — shown here so returning creators
+                  who jumped straight to publish can still set/fix them. */}
+              <Text style={styles.sectionLabel}>Your identity tag</Text>
+              <TextInput
+                value={identity}
+                onChangeText={setIdentity}
+                placeholder="e.g. Algo trader in Miami"
+                placeholderTextColor={Colors.textDim}
+                style={styles.input}
+                maxLength={40}
+              />
+
+              <Text style={styles.sectionLabel}>POV categories</Text>
+              <View style={styles.chipWrap}>
+                {CATEGORIES.map((c) => (
+                  <Chip
+                    key={c.id}
+                    label={c.label}
+                    emoji={c.emoji}
+                    accent={c.accent}
+                    active={picked.includes(c.id)}
+                    onPress={() =>
+                      setPicked((prev) =>
+                        prev.includes(c.id) ? prev.filter((p) => p !== c.id) : [...prev, c.id],
+                      )
+                    }
+                  />
+                ))}
+              </View>
+
+              <Text style={styles.sectionLabel}>Monthly price</Text>
+              <View style={styles.priceGrid}>
+                {PRICE_OPTIONS.map((p) => (
+                  <PressableScale key={p} onPress={() => setPrice(p)} scaleTo={0.93}>
+                    <View style={[styles.priceCard, price === p && styles.priceCardActive]}>
+                      <Text style={[styles.priceText, price === p && { color: Colors.ink }]}>
+                        ${p}
+                      </Text>
+                    </View>
+                  </PressableScale>
+                ))}
+              </View>
+              <Text style={styles.splitBody}>
+                You keep {formatMoney(price * 0.8)} / subscriber / month (80%).
+              </Text>
 
               {/* Consent checkbox */}
               <Pressable
