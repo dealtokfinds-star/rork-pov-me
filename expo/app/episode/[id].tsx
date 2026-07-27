@@ -20,8 +20,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EpisodeTile } from "@/components/cards";
 import { Avatar, Button, PressableScale, SectionHeader, Tag } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { categoryById, formatCount, formatDuration, formatMoney } from "@/lib/format";
-import { useCreator, useEpisode, useEpisodes } from "@/lib/data";
+import {
+  EPISODES,
+  categoryById,
+  creatorById,
+  episodeById,
+  formatCount,
+  formatDuration,
+  formatMoney,
+} from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
 
 export default function EpisodeScreen() {
@@ -37,9 +44,8 @@ export default function EpisodeScreen() {
     toggleLiked,
   } = useApp();
 
-  const { data: episode } = useEpisode(id);
-  const { data: creator } = useCreator(episode?.creatorId);
-  const { data: allEpisodes = [] } = useEpisodes();
+  const episode = episodeById(id ?? "");
+  const creator = creatorById(episode?.creatorId ?? "");
   const unlocked = episode ? canWatch(episode) : false;
 
   const player = useVideoPlayer(
@@ -52,8 +58,8 @@ export default function EpisodeScreen() {
   );
 
   const related = useMemo(
-    () => (episode ? allEpisodes.filter((e) => e.id !== episode.id && e.category === episode.category).slice(0, 6) : []),
-    [episode, allEpisodes],
+    () => EPISODES.filter((e) => e.id !== episode?.id && e.category === episode?.category).slice(0, 6),
+    [episode],
   );
 
   if (!episode || !creator) {
@@ -67,7 +73,6 @@ export default function EpisodeScreen() {
   }
 
   const cat = categoryById(episode.category);
-
   const saved = savedEpisodes.includes(episode.id);
   const liked = likedEpisodes.includes(episode.id);
 

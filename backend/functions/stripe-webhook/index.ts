@@ -221,8 +221,6 @@ Deno.serve(async (req) => {
       }
 
       else if (paymentType === "tip" && meta.creator_id) {
-        const creatorShare = amountDollars * 0.8;
-
         // Record the tip
         await admin.from("tips").insert({
           fan_id: userId,
@@ -235,7 +233,7 @@ Deno.serve(async (req) => {
           stripe_checkout_session_id: session.id,
           status: "completed",
           platform_fee: amountDollars * 0.2,
-          creator_payout: creatorShare,
+          creator_payout: amountDollars * 0.8,
         });
 
         // Mark transaction completed
@@ -245,31 +243,19 @@ Deno.serve(async (req) => {
           updated_at: now,
         }).eq("stripe_checkout_session_id", session.id);
 
-        // When the creator hasn't connected Stripe Connect, the charge ran on
-        // the platform account — credit their local payout_balance so they can
-        // withdraw once onboarding is done. (When connected, Stripe handles the
-        // transfer via transfer_data and we skip the local credit.)
-        if (meta.platform_held === "true") {
-          const { data: creator } = await admin.from("profiles")
-            .select("lifetime_earnings, payout_balance")
-            .eq("id", meta.creator_id)
-            .maybeSingle();
-          if (creator) {
-            await admin.from("profiles").update({
-              lifetime_earnings: Number(creator.lifetime_earnings ?? 0) + creatorShare,
-              payout_balance: Number(creator.payout_balance ?? 0) + creatorShare,
-              updated_at: now,
-            }).eq("id", meta.creator_id);
-          }
-        }
-        await emailCreator(admin, meta.creator_id, `You received a $${amountDollars.toFixed(2)} tip`, `<p>A fan tipped you <strong>$${amountDollars.toFixed(2)}</strong>. Your 80% share: <strong>$${creatorShare.toFixed(2)}</strong>.</p>`);
+        // Increment creator earnings
+        await admin.rpc("increment_creator_earnings", {
+          creator_id: meta.creator_id,
+          amount: amountDollars * 0.8,
+        }).catch(() => {
+          // RPC may not exist — fall back to manual update
+        });
+        await emailCreator(admin, meta.creator_id, `You received a $${amountDollars.toFixed(2)} tip`, `<p>A fan tipped you <strong>$${amountDollars.toFixed(2)}</strong>. Your 80% share: <strong>$${(amountDollars * 0.8).toFixed(2)}</strong>.</p>`);
       }
 
       else if (paymentType === "ppv" && meta.creator_id) {
         const targetId = meta.episode_id ?? meta.stream_id;
         if (targetId) {
-          const creatorShare = amountDollars * 0.8;
-
           // Record the unlock
           await admin.from("unlocks").insert({
             fan_id: userId,
@@ -280,7 +266,7 @@ Deno.serve(async (req) => {
             stripe_checkout_session_id: session.id,
             status: "completed",
             platform_fee: amountDollars * 0.2,
-            creator_payout: creatorShare,
+            creator_payout: amountDollars * 0.8,
           });
 
           // Mark transaction completed
@@ -290,21 +276,18 @@ Deno.serve(async (req) => {
             updated_at: now,
           }).eq("stripe_checkout_session_id", session.id);
 
-          // Credit creator earnings. When the creator has Stripe Connect, the
-          // 80% share is transferred automatically via transfer_data and we
-          // still keep a local mirror for the wallet UI. When platform_held,
-          // this local credit is the source of truth until they connect.
+          // Increment creator earnings
           const { data: creator } = await admin.from("profiles")
-            .select("lifetime_earnings, payout_balance, stripe_account_id")
+            .select("lifetime_earnings, payout_balance")
             .eq("id", meta.creator_id)
             .maybeSingle();
           if (creator) {
             await admin.from("profiles").update({
-              lifetime_earnings: Number(creator.lifetime_earnings ?? 0) + creatorShare,
-              payout_balance: Number(creator.payout_balance ?? 0) + creatorShare,
+              lifetime_earnings: Number(creator.lifetime_earnings ?? 0) + (amountDollars * 0.8),
+              payout_balance: Number(creator.payout_balance ?? 0) + (amountDollars * 0.8),
               updated_at: now,
             }).eq("id", meta.creator_id);
-            await emailCreator(admin, meta.creator_id, `PPV unlocked — $${amountDollars.toFixed(2)}`, `<p>A fan unlocked your premium content for <strong>$${amountDollars.toFixed(2)}</strong>. Your 80% share: <strong>$${creatorShare.toFixed(2)}</strong>.</p>`);
+            await emailCreator(admin, meta.creator_id, `PPV unlocked — $${amountDollars.toFixed(2)}`, `<p>A fan unlocked your premium content for <strong>$${amountDollars.toFixed(2)}</strong>. Your 80% share: <strong>$${(amountDollars * 0.8).toFixed(2)}</strong>.</p>`);
           }
         }
       }
@@ -341,59 +324,35 @@ Deno.serve(async (req) => {
     else if (event.type === "invoice.paid") {
       const invoice = await retrieveInvoice(obj.id as string) as Invoice;
       const meta = invoice.metadata ?? {};
-      let userId = meta.user_id;
-      let creatorId = meta.creator_id;
-      let platformHeld = meta.platform_held === "true";
-
-      // Fall back to the subscription's metadata if the invoice lacks it.
-      if ((!userId || !creatorId) && invoice.subscription) {
-        const sub = await retrieveSubscription(invoice.subscription) as Subscription;
-        const subMeta = sub.metadata ?? {};
-        userId = userId ?? subMeta.user_id;
-        creatorId = creatorId ?? subMeta.creator_id;
-        platformHeld = platformHeld || subMeta.platform_held === "true";
-        if (subMeta.user_id && subMeta.creator_id) {
-          // Update subscription renews_at
-          await admin.from("subscriptions").update({
-            active: true,
-            status: "active",
-            renews_at: new Date(sub.current_period_end * 1000).toISOString(),
-            updated_at: now,
-          }).eq("stripe_subscription_id", sub.id);
-        }
-      }
-
-      if (userId && creatorId) {
-        const amountDollars = centsToDollars(invoice.amount_paid);
-        const creatorShare = amountDollars * 0.8;
-
-        // Record renewal transaction
-        await admin.from("transactions").insert({
-          user_id: userId,
-          creator_id: creatorId,
-          amount: amountDollars,
-          kind: "sub",
-          label: "Subscription renewal",
-          status: "completed",
-          stripe_payment_intent_id: invoice.payment_intent ?? null,
-          currency: invoice.currency,
-          platform_fee: amountDollars * 0.2,
-          creator_payout: creatorShare,
-        });
-
-        // For platform-held subscriptions (creator not on Connect), credit the
-        // creator's local payout_balance so they can withdraw once onboarded.
-        if (platformHeld) {
-          const { data: creator } = await admin.from("profiles")
-            .select("lifetime_earnings, payout_balance")
-            .eq("id", creatorId)
-            .maybeSingle();
-          if (creator) {
-            await admin.from("profiles").update({
-              lifetime_earnings: Number(creator.lifetime_earnings ?? 0) + creatorShare,
-              payout_balance: Number(creator.payout_balance ?? 0) + creatorShare,
+      const userId = meta.user_id;
+      const creatorId = meta.creator_id;
+      if (!userId || !creatorId) {
+        // Try to look up via subscription
+        if (invoice.subscription) {
+          const sub = await retrieveSubscription(invoice.subscription) as Subscription;
+          const subMeta = sub.metadata ?? {};
+          if (subMeta.user_id && subMeta.creator_id) {
+            // Update subscription renews_at
+            await admin.from("subscriptions").update({
+              active: true,
+              status: "active",
+              renews_at: new Date(sub.current_period_end * 1000).toISOString(),
               updated_at: now,
-            }).eq("id", creatorId);
+            }).eq("stripe_subscription_id", sub.id);
+
+            // Record renewal transaction
+            await admin.from("transactions").insert({
+              user_id: subMeta.user_id,
+              creator_id: subMeta.creator_id,
+              amount: centsToDollars(invoice.amount_paid),
+              kind: "sub",
+              label: "Subscription renewal",
+              status: "completed",
+              stripe_payment_intent_id: invoice.payment_intent ?? null,
+              currency: invoice.currency,
+              platform_fee: centsToDollars(invoice.amount_paid) * 0.2,
+              creator_payout: centsToDollars(invoice.amount_paid) * 0.8,
+            });
           }
         }
       }

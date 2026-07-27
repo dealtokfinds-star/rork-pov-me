@@ -16,8 +16,7 @@ import {
   SectionHeader,
 } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { CATEGORIES, formatMoney } from "@/lib/format";
-import { useCategories } from "@/hooks/useDiscovery";
+import { CATEGORIES, CREATORS, formatMoney } from "@/constants/mock-data";
 import { useCreators, useEpisodes, useStreams } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
 import type { Episode, PovCategory } from "@/types";
@@ -34,12 +33,10 @@ export default function FeedScreen() {
   const { data: streamsData } = useStreams();
   const { data: episodesData } = useEpisodes();
   const { data: creatorsData } = useCreators();
-  const { data: dbCategories } = useCategories();
-  const allCategories = dbCategories ?? CATEGORIES;
 
   const liveNow = useMemo(() => (streamsData ?? []).filter((s) => s.viewers > 0), [streamsData]);
   const allEpisodes = episodesData ?? [];
-  const allCreators = creatorsData ?? [];
+  const allCreators = creatorsData ?? CREATORS;
 
   const episodes = useMemo<Episode[]>(() => {
     const subIds = new Set(activeSubs.map((s) => s.creatorId));
@@ -136,7 +133,7 @@ export default function FeedScreen() {
               contentContainerStyle={styles.chipRail}
             >
               <Chip label="All POVs" active={category === "all"} onPress={() => setCategory("all")} />
-              {allCategories.map((c) => (
+              {CATEGORIES.map((c) => (
                 <Chip
                   key={c.id}
                   label={c.label}

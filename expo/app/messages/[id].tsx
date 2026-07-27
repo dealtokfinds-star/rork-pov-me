@@ -14,7 +14,7 @@ import {
 
 import { Avatar, PressableScale, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { formatMoney } from "@/lib/format";
+import { formatMoney } from "@/constants/mock-data";
 import { useDmThread, type DmMessageRow } from "@/hooks/useDMs";
 import { useProfile } from "@/hooks/useProfile";
 

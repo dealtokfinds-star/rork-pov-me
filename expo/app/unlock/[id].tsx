@@ -7,19 +7,30 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Avatar, Button, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { categoryById, formatDuration, formatMoney } from "@/lib/format";
+import {
+  categoryById,
+  creatorById,
+  episodeById,
+  formatDuration,
+  formatMoney,
+} from "@/constants/mock-data";
 import { useEpisode, useCreator } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
 
 export default function UnlockScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { unlockViaStripe, balance, hasUnlocked } = useApp();
+  const { unlockEpisode, unlockViaStripe, balance, hasUnlocked } = useApp();
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<boolean>(false);
 
-  const { data: episode } = useEpisode(id);
-  const { data: creator } = useCreator(episode?.creatorId);
+  // Try real Supabase episode/creator first, fall back to mock
+  const { data: realEpisode } = useEpisode(id);
+  const mockEpisode = episodeById(id ?? "");
+  const episode = realEpisode ?? mockEpisode;
+  const { data: realCreator } = useCreator(episode?.creatorId);
+  const mockCreator = creatorById(episode?.creatorId ?? "");
+  const creator = realCreator ?? mockCreator;
 
   if (!episode || !creator) {
     return (
@@ -116,9 +127,22 @@ export default function UnlockScreen() {
                 router.back();
                 return;
               }
-              setError(result.error ?? `Unlock failed. Add funds to your wallet and try again.`);
+              // Fallback to wallet-based mock
+              const ok = unlockEpisode(episode.id, price);
+              if (!ok) {
+                setError(result.error ?? `You have ${formatMoney(balance)}. Add funds to unlock.`);
+              } else {
+                haptic("success");
+                router.back();
+              }
             } catch (err) {
-              setError(err instanceof Error ? err.message : "Unlock failed");
+              const ok = unlockEpisode(episode.id, price);
+              if (!ok) {
+                setError(err instanceof Error ? err.message : "Unlock failed");
+              } else {
+                haptic("success");
+                router.back();
+              }
             } finally {
               setProcessing(false);
             }

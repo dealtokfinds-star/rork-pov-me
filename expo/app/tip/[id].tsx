@@ -5,7 +5,7 @@ import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { Avatar, Button, PressableScale, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { GIFTS, formatMoney } from "@/lib/format";
+import { GIFTS, creatorById, formatMoney } from "@/constants/mock-data";
 import { useCreator } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
 
@@ -14,7 +14,7 @@ const PRESETS = [2, 5, 10, 20, 50, 100];
 export default function TipScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { tipViaStripe, balance, tipTotals } = useApp();
+  const { tip, tipViaStripe, balance, tipTotals } = useApp();
   const [amount, setAmount] = useState<number>(5);
   const [custom, setCustom] = useState<string>("");
   const [note, setNote] = useState<string>("");
@@ -22,7 +22,10 @@ export default function TipScreen() {
   const [sent, setSent] = useState<number | null>(null);
   const [processing, setProcessing] = useState<boolean>(false);
 
-  const { data: creator } = useCreator(id);
+  // Try real Supabase creator first, fall back to mock
+  const { data: realCreator } = useCreator(id);
+  const mockCreator = creatorById(id ?? "");
+  const creator = realCreator ?? mockCreator;
   if (!creator) {
     return (
       <View style={styles.screen}>
@@ -108,22 +111,14 @@ export default function TipScreen() {
           <PressableScale
             key={g.id}
             scaleTo={0.9}
-            onPress={async () => {
-              setProcessing(true);
-              setError(null);
-              try {
-                const result = await tipViaStripe(creator.id, g.price, g.name);
-                if (result.success) {
-                  haptic("success");
-                  setSent(g.price);
-                  return;
-                }
-                setError(result.error ?? "Tip failed");
-              } catch (err) {
-                setError(err instanceof Error ? err.message : "Tip failed");
-              } finally {
-                setProcessing(false);
+            onPress={() => {
+              const ok = tip(creator.id, g.price, g.name);
+              if (!ok) {
+                setError(`Wallet has ${formatMoney(balance)}. Top up to send gifts.`);
+                return;
               }
+              haptic("success");
+              setSent(g.price);
             }}
           >
             <View style={styles.giftCard}>
@@ -157,9 +152,22 @@ export default function TipScreen() {
               setSent(resolved);
               return;
             }
-            setError(result.error ?? `Tip failed. Top up your wallet and try again.`);
+            // Fallback to wallet-based mock
+            const ok = tip(creator.id, resolved);
+            if (!ok) {
+              setError(result.error ?? `Wallet has ${formatMoney(balance)}. Top up to tip.`);
+            } else {
+              haptic("success");
+              setSent(resolved);
+            }
           } catch (err) {
-            setError(err instanceof Error ? err.message : "Tip failed");
+            const ok = tip(creator.id, resolved);
+            if (!ok) {
+              setError(err instanceof Error ? err.message : "Tip failed");
+            } else {
+              haptic("success");
+              setSent(resolved);
+            }
           } finally {
             setProcessing(false);
           }

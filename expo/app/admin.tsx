@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar, Chip, PressableScale, SectionHeader, StatTile, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { formatMoney } from "@/lib/format";
+import { formatMoney } from "@/constants/mock-data";
 import { useAdminCategories, useCategories, type CategoryInput } from "@/hooks/useDiscovery";
 import { useProfile } from "@/hooks/useProfile";
 import {

@@ -53,7 +53,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChatOverlay, type ChatOverlayHandle } from "@/components/ChatOverlay";
 import { Button, LiveBadge, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { formatCount, formatMoney } from "@/lib/format";
+import { formatCount, formatMoney } from "@/constants/mock-data";
 import { useStreamingPermissions } from "@/lib/streaming/PermissionHandler";
 import {
   StreamSession,
@@ -83,7 +83,7 @@ export default function HostScreen({
 }: HostScreenProps): React.ReactElement {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { displayName, balance } = useApp();
+  const { displayName, balance, tip } = useApp();
   useKeepAwake("povme-host");
 
   // ---- permissions ---------------------------------------------------------

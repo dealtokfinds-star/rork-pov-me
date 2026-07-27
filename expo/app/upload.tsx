@@ -7,8 +7,7 @@ import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { Button, Chip, PressableScale, ProgressBar, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { CATEGORIES, formatMoney } from "@/lib/format";
-import { useCategories } from "@/hooks/useDiscovery";
+import { CATEGORIES, formatMoney } from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
 import type { AccessLevel, PovCategory } from "@/types";
 
@@ -18,8 +17,6 @@ const PPV_PRICES = [4.99, 6.99, 9.99, 12.99, 14.99, 19.99];
 export default function UploadScreen() {
   const router = useRouter();
   const { publishEpisode, creatorPrice } = useApp();
-  const { data: dbCategories } = useCategories();
-  const allCategories = dbCategories ?? CATEGORIES;
   const [title, setTitle] = useState<string>("");
   const [description, setDescription] = useState<string>("");
   const [thumb, setThumb] = useState<string>(
@@ -174,7 +171,7 @@ export default function UploadScreen() {
 
       <Text style={styles.label}>Identity tag</Text>
       <View style={styles.chipWrap}>
-        {allCategories.map((c) => (
+        {CATEGORIES.map((c) => (
           <Chip
             key={c.id}
             label={c.label}

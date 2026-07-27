@@ -26,12 +26,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar, Button, Chip, PressableScale, ProgressBar } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { CATEGORIES } from "@/lib/format";
-import { useCategories } from "@/hooks/useDiscovery";
-import { useCreators } from "@/lib/data";
+import { CATEGORIES, CREATORS } from "@/constants/mock-data";
 import { useProfile } from "@/hooks/useProfile";
 import { useApp } from "@/providers/app-provider";
-import type { Category, Creator, PovCategory } from "@/types";
+import type { Creator, PovCategory } from "@/types";
 
 /**
  * POVMe onboarding — the "first episode" of the user's own POVMe life.
@@ -85,10 +83,6 @@ export default function OnboardingScreen() {
   const router = useRouter();
   const { completeOnboarding, toggleFollow } = useApp();
   const { updateProfile } = useProfile();
-  const { data: dbCategories } = useCategories();
-  const { data: creatorsData } = useCreators();
-  const allCategories = dbCategories ?? CATEGORIES;
-  const allCreators = creatorsData ?? [];
   const [step, setStep] = useState<number>(0);
   const [name, setName] = useState<string>("");
   const [picked, setPicked] = useState<PovCategory[]>([]);
@@ -118,8 +112,8 @@ export default function OnboardingScreen() {
   // Creators recommended for the picked categories; fall back to all if none picked.
   const recommendedCreators: Creator[] =
     picked.length > 0
-      ? allCreators.filter((c) => c.categories.some((cat) => picked.includes(cat)))
-      : allCreators;
+      ? CREATORS.filter((c) => c.categories.some((cat) => picked.includes(cat)))
+      : CREATORS;
 
   const finish = async (): Promise<void> => {
     setFinishing(true);
@@ -242,7 +236,6 @@ export default function OnboardingScreen() {
 
               {step === TASTE_STEP && (
                 <TasteStep
-                  categories={allCategories}
                   picked={picked}
                   toggle={toggleCategory}
                   onContinue={() => go(FOLLOW_STEP)}
@@ -324,12 +317,10 @@ function IdentityStep({
 /* ------------------------------- Step 2: Taste ----------------------------- */
 
 function TasteStep({
-  categories,
   picked,
   toggle,
   onContinue,
 }: {
-  categories: Category[];
   picked: PovCategory[];
   toggle: (id: PovCategory) => void;
   onContinue: () => void;
@@ -342,7 +333,7 @@ function TasteStep({
         Pick a few. We&apos;ll shape your Discover feed around them — change it anytime.
       </Text>
       <View style={styles.chipWrap}>
-        {categories.map((c) => (
+        {CATEGORIES.map((c) => (
           <Chip
             key={c.id}
             label={c.label}

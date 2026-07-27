@@ -32,8 +32,7 @@ import {
 
 import { Button, Chip, PressableScale, ProgressBar, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { CATEGORIES, formatMoney } from "@/lib/format";
-import { useCategories } from "@/hooks/useDiscovery";
+import { CATEGORIES, formatMoney } from "@/constants/mock-data";
 import { useAuth } from "@/hooks/useAuth";
 import {
   connectStripePayouts,
@@ -63,8 +62,6 @@ export default function BecomeCreatorScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const { data: dbCategories } = useCategories();
-  const allCategories = dbCategories ?? CATEGORIES;
 
   const [step, setStep] = useState<number>(0);
   const [identity, setIdentity] = useState<string>("");
@@ -624,7 +621,7 @@ export default function BecomeCreatorScreen() {
             Fans find you through these. Pick the lifestyles your feed actually shows.
           </Text>
           <View style={styles.chipWrap}>
-            {allCategories.map((c) => (
+            {CATEGORIES.map((c) => (
               <Chip
                 key={c.id}
                 label={c.label}

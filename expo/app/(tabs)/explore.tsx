@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CreatorCard, CreatorRow, EpisodeTile } from "@/components/cards";
 import { Chip, EmptyState, PressableScale, SectionHeader, Tag } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { CATEGORIES, formatCount, formatMoney } from "@/lib/format";
+import { CATEGORIES, CREATORS, EPISODES, formatCount, formatMoney } from "@/constants/mock-data";
 import { useCreators, useEpisodes } from "@/lib/data";
 import {
   useCategories,
@@ -41,8 +41,8 @@ export default function ExploreScreen() {
   const { data: episodesData } = useEpisodes();
   const { data: dbCategories } = useCategories();
   const allCategories = dbCategories ?? CATEGORIES;
-  const allCreators = creatorsData ?? [];
-  const allEpisodes = episodesData ?? [];
+  const allCreators = creatorsData ?? CREATORS;
+  const allEpisodes = episodesData ?? EPISODES;
 
   const activeSortDef = SORTS.find((s) => s.id === sort) ?? SORTS[0];
   const q = query.trim();

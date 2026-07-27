@@ -9,9 +9,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LiveStreamCard } from "@/components/cards";
 import { Avatar, Button, Chip, LiveBadge, PressableScale, SectionHeader, Tag } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { CATEGORIES, categoryById, formatCount, formatMoney } from "@/lib/format";
-import { useCategories } from "@/hooks/useDiscovery";
-import { useCreatorMap } from "@/hooks/useCreatorMap";
+import {
+  CATEGORIES,
+  CREATORS,
+  categoryById,
+  creatorById,
+  formatCount,
+  formatMoney,
+} from "@/constants/mock-data";
 import { useCreators, useStreams } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
 import type { PovCategory } from "@/types";
@@ -36,11 +41,8 @@ export default function LiveScreen() {
   const [category, setCategory] = useState<PovCategory | "all">("all");
   const { data: streamsData } = useStreams();
   const { data: creatorsData } = useCreators();
-  const { data: dbCategories } = useCategories();
-  const { get: getCreator } = useCreatorMap();
-  const allCategories = dbCategories ?? CATEGORIES;
   const allStreams = streamsData ?? [];
-  const allCreators = creatorsData ?? [];
+  const allCreators = creatorsData ?? CREATORS;
 
   const streams = useMemo(
     () => (category === "all" ? allStreams : allStreams.filter((s) => s.category === category)),
@@ -93,11 +95,11 @@ export default function LiveScreen() {
             </View>
             <View style={styles.featuredBody}>
               <View style={styles.rowCenter}>
-                <Avatar uri={getCreator(featured.creatorId)?.avatar ?? featured.thumb} size={38} ring live />
+                <Avatar uri={creatorById(featured.creatorId)?.avatar ?? ""} size={38} ring live />
                 <View style={{ marginLeft: 10 }}>
-                  <Text style={styles.featuredName}>{getCreator(featured.creatorId)?.name ?? "Creator"}</Text>
+                  <Text style={styles.featuredName}>{creatorById(featured.creatorId)?.name}</Text>
                   <Text style={styles.featuredIdentity}>
-                    {categoryById(featured.category).emoji} {getCreator(featured.creatorId)?.identity ?? ""}
+                    {categoryById(featured.category).emoji} {creatorById(featured.creatorId)?.identity}
                   </Text>
                 </View>
               </View>
@@ -115,7 +117,7 @@ export default function LiveScreen() {
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRail}>
         <Chip label="All" active={category === "all"} onPress={() => setCategory("all")} />
-        {allCategories.map((c) => (
+        {CATEGORIES.map((c) => (
           <Chip
             key={c.id}
             label={c.label}
@@ -139,7 +141,7 @@ export default function LiveScreen() {
       <SectionHeader kicker="Fan-made" title="Top clips" action="Clip guide" onAction={() => router.push("/guidelines")} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
         {CLIPS.map((clip) => {
-          const creator = getCreator(clip.creatorId);
+          const creator = creatorById(clip.creatorId);
           return (
             <PressableScale key={clip.id} scaleTo={0.96} onPress={() => router.push(`/creator/${clip.creatorId}`)}>
               <View style={styles.clip}>
@@ -167,7 +169,7 @@ export default function LiveScreen() {
       <SectionHeader kicker="Set a reminder" title="Scheduled POVs" />
       <View style={styles.schedWrap}>
         {SCHEDULED.map((item) => {
-          const creator = getCreator(item.creatorId);
+          const creator = creatorById(item.creatorId);
           return (
             <PressableScale key={item.id} scaleTo={0.98} onPress={() => router.push(`/creator/${item.creatorId}`)}>
               <View style={styles.schedRow}>

@@ -30,9 +30,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar, Button, LiveBadge, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
-import { CHAT_COLORS, GIFTS, formatCount, formatMoney, randomChat } from "@/lib/format";
-import { useStream } from "@/lib/data";
-import { useCreatorMap } from "@/hooks/useCreatorMap";
+import {
+  CHAT_COLORS,
+  GIFTS,
+  creatorById,
+  formatCount,
+  formatMoney,
+  randomChat,
+  streamById,
+} from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
 import type { ChatMessage } from "@/types";
 
@@ -45,16 +51,15 @@ export default function LiveRoomScreen() {
   const {
     isSubscribed,
     hasStreamAccess,
-    unlockViaStripe,
-    subscribeViaStripe,
-    tipViaStripe,
+    unlockStream,
+    subscribe,
+    tip,
     balance,
     displayName,
   } = useApp();
 
-  const { data: stream } = useStream(id);
-  const { get: getCreator } = useCreatorMap();
-  const creator = stream ? getCreator(stream.creatorId) : undefined;
+  const stream = streamById(id ?? "");
+  const creator = creatorById(stream?.creatorId ?? "");
 
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     Array.from({ length: 8 }, () => randomChat()),
@@ -64,7 +69,6 @@ export default function LiveRoomScreen() {
   const [hearts, setHearts] = useState<{ id: number; x: number }[]>([]);
   const [viewers, setViewers] = useState<number>(stream?.viewers ?? 0);
   const [banner, setBanner] = useState<string | null>(null);
-  const [processingTip, setProcessingTip] = useState<boolean>(false);
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const heartId = useRef<number>(0);
 
@@ -134,37 +138,30 @@ export default function LiveRoomScreen() {
   }, []);
 
   const sendTip = useCallback(
-    async (amount: number, label?: string) => {
+    (amount: number, label?: string) => {
       if (!stream) return;
-      setProcessingTip(true);
-      try {
-        const result = await tipViaStripe(stream.creatorId, amount, label);
-        if (!result.success) {
-          showBanner(result.error ?? "Tip failed — top up to keep supporting.");
-          return;
-        }
-        haptic("success");
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `tip${Date.now()}`,
-            user: displayName,
-            color: Colors.gold,
-            text: label ? `sent ${label}` : "tipped the stream",
-            kind: label ? "gift" : "tip",
-            amount,
-            badge: "top",
-          },
-        ]);
-        setGiftOpen(false);
-        showBanner(`${label ?? "Tip"} sent · ${formatMoney(amount)}`);
-      } catch (err) {
-        showBanner(err instanceof Error ? err.message : "Tip failed");
-      } finally {
-        setProcessingTip(false);
+      const ok = tip(stream.creatorId, amount, label);
+      if (!ok) {
+        showBanner("Not enough wallet balance — top up to keep supporting.");
+        return;
       }
+      haptic("success");
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `tip${Date.now()}`,
+          user: displayName,
+          color: Colors.gold,
+          text: label ? `sent ${label}` : "tipped the stream",
+          kind: label ? "gift" : "tip",
+          amount,
+          badge: "top",
+        },
+      ]);
+      setGiftOpen(false);
+      showBanner(`${label ?? "Tip"} sent · ${formatMoney(amount)}`);
     },
-    [stream, tipViaStripe, displayName, showBanner],
+    [stream, tip, displayName, showBanner],
   );
 
   if (!stream || !creator) {
@@ -215,22 +212,15 @@ export default function LiveRoomScreen() {
           <Button
             label={isPpv ? `Unlock live · ${formatMoney(price)}` : `Subscribe · ${formatMoney(price)}/mo`}
             variant={isPpv ? "ppv" : "primary"}
-            onPress={async () => {
-              if (isPpv) {
-                const result = await unlockViaStripe(stream.id, price, stream.creatorId, stream.id);
-                if (!result.success) {
-                  showBanner(result.error ?? `Wallet balance is ${formatMoney(balance)} — top up to join.`);
-                  return;
-                }
-                haptic("success");
-              } else {
-                const result = await subscribeViaStripe(stream.creatorId, price);
-                if (!result.success) {
-                  showBanner(result.error ?? `Wallet balance is ${formatMoney(balance)} — top up to join.`);
-                  return;
-                }
-                haptic("success");
+            onPress={() => {
+              const ok = isPpv
+                ? unlockStream(stream.id, price, stream.creatorId)
+                : subscribe(stream.creatorId, price);
+              if (!ok) {
+                showBanner(`Wallet balance is ${formatMoney(balance)} — top up to join.`);
+                return;
               }
+              haptic("success");
             }}
             style={{ marginTop: 22 }}
           />
