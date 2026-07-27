@@ -1,24 +1,23 @@
 import { requireAuth, createAdminClient, AuthError, corsHeaders, json } from "../_shared/auth.ts";
+import {
+  retrieveBalance,
+  createPayout,
+  retrieveAccount,
+  StripeError,
+} from "../_shared/stripe.ts";
 
 /**
  * POST /request-payout
+ * Issues a real Stripe Payout on the creator's Connect Express account.
  *
- * Platform-managed withdrawal. Stripe Connect is not available on this
- * platform account, so payouts run off the local ledger:
+ * Body: { amount?: number }  // dollars; if omitted, pays out full available balance
+ * Returns: { payout_id: string, amount: number, status: string }
  *
- *   1. Fan payments settle to the platform Stripe account.
- *   2. The webhook credits the creator's 80% share to profiles.payout_balance.
- *   3. This endpoint moves the requested amount into pending_payout and files a
- *      row in payout_requests.
- *   4. The payouts team sends the money to the creator's saved destination and
- *      marks it paid (or failed, which refunds the balance) from the admin panel.
- *
- * Body: { amount?: number }  // dollars; omitted = full available balance
- * Returns: { request_id, amount, status, method, handle, eta }
+ * Requirements:
+ *   - Creator must have a Stripe Connect account (stripe_account_id)
+ *   - Account must have payouts_enabled = true (onboarding complete, bank added)
+ *   - Amount must be >= $1 and <= Stripe available balance
  */
-
-const MIN_PAYOUT = 25;
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -29,88 +28,108 @@ Deno.serve(async (req) => {
     const admin = createAdminClient();
 
     const { data: profile } = await admin.from("profiles")
-      .select("id, kyc_status, payout_method, payout_handle, payout_balance, pending_payout, stripe_payouts_enabled")
+      .select(
+        "id, stripe_account_id, stripe_payouts_enabled, stripe_account_status, payout_balance, pending_payout",
+      )
       .eq("id", user.userId)
       .maybeSingle();
 
     if (!profile) return json({ error: "Profile not found" }, 404);
 
-    const method = profile.payout_method as string | null;
-    const handle = profile.payout_handle as string | null;
-
-    if (!method || !handle) {
-      return json({ error: "Add a payout destination first (PayPal, Cash App, Venmo, Zelle or bank)" }, 400);
+    const accountId = profile.stripe_account_id as string | null;
+    if (!accountId) {
+      return json({ error: "Connect a Stripe account first to receive payouts" }, 400);
     }
-    if (profile.stripe_payouts_enabled === false) {
-      return json({ error: "Payouts are on hold for this account. Contact support." }, 403);
-    }
-    if (profile.kyc_status !== "verified") {
-      return json({ error: "Your ID review must be approved before you can withdraw" }, 403);
+    if (!profile.stripe_payouts_enabled) {
+      return json({ error: "Finish Stripe onboarding and add a bank account to withdraw" }, 400);
     }
 
-    // Block duplicate open requests
-    const { data: open } = await admin.from("payout_requests")
-      .select("id")
-      .eq("creator_id", user.userId)
-      .in("status", ["pending", "processing"])
-      .limit(1);
-
-    if ((open?.length ?? 0) > 0) {
-      return json({ error: "You already have a withdrawal in progress" }, 409);
+    // Verify account status live (in case onboarding was completed recently)
+    let account;
+    try {
+      account = await retrieveAccount(accountId);
+    } catch (err) {
+      if (err instanceof StripeError) {
+        return json({ error: err.message }, err.status);
+      }
+      throw err;
+    }
+    if (!account.payouts_enabled) {
+      // Sync status locally for next time
+      await admin.from("profiles").update({
+        stripe_payouts_enabled: false,
+        stripe_account_status: account.details_submitted ? "restricted" : "restricted",
+        updated_at: new Date().toISOString(),
+      }).eq("id", user.userId);
+      return json({ error: "Stripe onboarding incomplete — finish adding your bank details" }, 400);
     }
 
-    const available = Number(profile.payout_balance ?? 0);
-    const requested = body.amount && body.amount > 0 ? Number(body.amount) : available;
-    const amount = Math.floor(requested * 100) / 100;
-
-    if (amount < MIN_PAYOUT) {
-      return json({ error: `Minimum withdrawal is $${MIN_PAYOUT.toFixed(2)}` }, 400);
-    }
-    if (amount > available) {
-      return json({ error: `Insufficient balance. Available: $${available.toFixed(2)}` }, 400);
+    // Pull the live available balance from Stripe (in cents)
+    const bal = await retrieveBalance(accountId);
+    const availableCents = bal.available?.[0]?.amount ?? 0;
+    if (availableCents <= 0) {
+      return json({
+        error: `No available balance yet. Pending funds clear in 1–2 business days.`,
+      }, 400);
     }
 
-    const { data: request, error: insertError } = await admin.from("payout_requests")
-      .insert({
-        creator_id: user.userId,
-        amount,
-        payout_method: method,
-        payout_handle: handle,
-        status: "pending",
-        requested_at: new Date().toISOString(),
-      })
-      .select("id, amount, status, requested_at")
-      .single();
-
-    if (insertError || !request) {
-      console.error("[request-payout] insert failed:", insertError?.message);
-      return json({ error: "Could not file your withdrawal request" }, 500);
+    let amountCents: number;
+    if (body.amount && body.amount > 0) {
+      amountCents = Math.round(body.amount * 100);
+      if (amountCents > availableCents) {
+        return json({
+          error: `Insufficient balance. Available: $${(availableCents / 100).toFixed(2)}`,
+        }, 400);
+      }
+    } else {
+      amountCents = availableCents;
     }
 
-    // Reserve the funds so they can't be requested twice.
-    const { error: ledgerError } = await admin.from("profiles").update({
-      payout_balance: Math.max(0, available - amount),
-      pending_payout: Number(profile.pending_payout ?? 0) + amount,
+    if (amountCents < 100) {
+      return json({ error: "Minimum payout is $1.00" }, 400);
+    }
+
+    // Issue the payout on the creator's Connect account
+    const payout = await createPayout(
+      {
+        amount: amountCents,
+        currency: "usd",
+        method: "standard",
+        metadata: { user_id: user.userId, requested_by: user.userId },
+      },
+      accountId,
+    );
+
+    // Record a local row so the webhook can reconcile status
+    await admin.from("payouts").insert({
+      creator_id: user.userId,
+      amount: amountCents / 100,
+      currency: "usd",
+      method: "standard",
+      status: payout.status,
+      stripe_payout_id: payout.id,
+      stripe_transfer_id: null,
+      requested_at: new Date().toISOString(),
+    });
+
+    // Reserve the funds: move from payout_balance to pending_payout (local ledger mirror)
+    await admin.from("profiles").update({
+      payout_balance: Math.max(0, Number(profile.payout_balance ?? 0) - (amountCents / 100)),
+      pending_payout: Number(profile.pending_payout ?? 0) + (amountCents / 100),
       updated_at: new Date().toISOString(),
     }).eq("id", user.userId);
 
-    if (ledgerError) {
-      // Roll the request back so the ledger and the queue never diverge.
-      await admin.from("payout_requests").delete().eq("id", request.id);
-      console.error("[request-payout] ledger update failed:", ledgerError.message);
-      return json({ error: "Could not reserve your balance — try again" }, 500);
-    }
-
     return json({
-      request_id: request.id,
-      amount,
-      status: "pending",
-      method,
-      handle,
-      eta: "1–3 business days",
+      payout_id: payout.id,
+      amount: amountCents / 100,
+      status: payout.status,
     });
   } catch (err) {
     if (err instanceof AuthError) return json({ error: "Unauthorized" }, 401);
+    if (err instanceof StripeError) {
+      console.error("[request-payout] Stripe error:", err.status, err.body);
+      return json({ error: err.message }, err.status);
+    }
     console.error("[request-payout] error:", err);
     return json({ error: "Internal server error" }, 500);
   }

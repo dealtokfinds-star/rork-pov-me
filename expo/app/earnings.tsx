@@ -23,7 +23,7 @@ export default function EarningsScreen() {
   const [payoutError, setPayoutError] = useState<string | null>(null);
   const [withdrawing, setWithdrawing] = useState<boolean>(false);
 
-  // Platform ledger balance via edge function
+  // Real Stripe Connect balance via edge function
   const { data: balance, isLoading, refetch } = useQuery<CreatorBalance>({
     queryKey: ["creator-balance"],
     queryFn: fetchCreatorBalance,
@@ -36,15 +36,13 @@ export default function EarningsScreen() {
   const payoutsEnabled = balance?.payouts_enabled ?? false;
   const payouts = balance?.payouts ?? [];
   const payoutMethod = balance?.payout_method ?? null;
-  const payoutLabel = balance?.payout_label ?? null;
   const payoutHandle = balance?.payout_handle ?? null;
-  const minimum = balance?.minimum_payout ?? 25;
 
   const handleWithdraw = async (): Promise<void> => {
     setWithdrawing(true);
     setPayoutError(null);
     try {
-      await requestPayout(); // full available balance
+      const result = await requestPayout(); // full available balance
       setRequested(true);
       haptic("success");
       void refetch();
@@ -82,31 +80,21 @@ export default function EarningsScreen() {
           <View style={styles.pending}>
             <Clock size={14} color={Colors.gold} />
             <Text style={styles.pendingText}>
-              Withdrawal requested — we&apos;re sending it to {payoutHandle ?? "your account"} within
-              1–3 business days
+              Payout requested — Stripe is sending it to your bank account within 1–2 business days
             </Text>
           </View>
         ) : payoutsEnabled ? (
-          <>
-            <Button
-              label={withdrawing ? "Processing…" : `Withdraw ${formatMoney(available)}`}
-              icon={<Banknote size={16} color={Colors.ink} />}
-              onPress={() => void handleWithdraw()}
-              disabled={withdrawing || available < minimum}
-              style={{ marginTop: 18 }}
-            />
-            {available < minimum ? (
-              <Text style={styles.minNote}>
-                {formatMoney(minimum - available)} to go until the {formatMoney(minimum)} minimum
-              </Text>
-            ) : null}
-          </>
+          <Button
+            label={withdrawing ? "Processing…" : `Withdraw to bank`}
+            icon={<Banknote size={16} color={Colors.ink} />}
+            onPress={() => void handleWithdraw()}
+            disabled={withdrawing || available < 1}
+            style={{ marginTop: 18 }}
+          />
         ) : (
           <View style={styles.disabledBox}>
             <Text style={styles.disabledText}>
-              {payoutMethod
-                ? "Withdrawals unlock once your ID review is approved."
-                : "Add a payout destination in Become a Creator — PayPal, Cash App, Venmo, Zelle or bank."}
+              Connect a Stripe account in Become a Creator to withdraw earnings to your bank.
             </Text>
           </View>
         )}
@@ -142,12 +130,12 @@ export default function EarningsScreen() {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.accountLabel}>
-            {payoutMethod ? `${payoutLabel ?? payoutMethod} · ${payoutHandle ?? ""}` : "No payout method set"}
+            {payoutMethod ? "Stripe · bank account" : "No payout method set"}
           </Text>
           <Text style={styles.accountSub}>
             {payoutMethod
-              ? `${formatMoney(minimum)} minimum · sent within 1–3 business days`
-              : "Add a destination in Become a Creator to withdraw"}
+              ? "Stripe Connect · deposits in 1–2 business days"
+              : "Connect Stripe in Become a Creator to withdraw"}
           </Text>
         </View>
         {payoutMethod ? <Check size={17} color={Colors.success} /> : null}
@@ -155,7 +143,7 @@ export default function EarningsScreen() {
 
       <SectionHeader kicker="History" title="Recent payouts" />
       {payouts.length === 0 ? (
-        <Text style={styles.empty}>No withdrawals yet. Your requests will appear here.</Text>
+        <Text style={styles.empty}>No payouts yet. Your withdrawals will appear here.</Text>
       ) : (
         <View style={styles.payoutList}>
           {payouts.map((p) => (
@@ -179,9 +167,8 @@ export default function EarningsScreen() {
 
       <PressableScale>
         <Text style={styles.legal}>
-          povme keeps 20% of gross revenue. Withdrawals are sent to your saved payout destination
-          within 1–3 business days of the request. Taxes are your responsibility — export your
-          annual statement from Settings.
+          povme keeps 20% of gross revenue. Payouts are deposited to your bank via Stripe.
+          Taxes are your responsibility — export your annual statement from Settings.
         </Text>
       </PressableScale>
     </ScrollView>
@@ -225,7 +212,6 @@ const styles = StyleSheet.create({
   },
   disabledText: { color: Colors.textDim, fontSize: 12.5, fontWeight: "600", lineHeight: 18 },
   payoutError: { color: Colors.danger, fontSize: 12.5, fontWeight: "700", marginTop: 10 },
-  minNote: { color: Colors.textDim, fontSize: 11.5, fontWeight: "700", marginTop: 9, textAlign: "center" },
   statRow: { flexDirection: "row", gap: 10, paddingHorizontal: 18 },
   mixCard: {
     marginHorizontal: 18,

@@ -59,7 +59,7 @@ export default function AdminScreen() {
         <StatTile label="ID reviews" value={`${verifications.filter((v) => v.status === "pending").length}`} sub="awaiting review" accent={Colors.cyan} />
       </View>
       <View style={styles.statRow}>
-        <StatTile label="Withdrawals" value={`${payoutRequests.filter((p) => p.status === "pending" || p.status === "processing").length}`} sub="to send" accent={Colors.gold} />
+        <StatTile label="Stripe payouts" value={`${payoutRequests.filter((p) => p.status === "pending" || p.status === "in_transit").length}`} sub="in flight" accent={Colors.gold} />
         <StatTile label="Pending creators" value={`${creators.filter((c) => c.kyc_status === "pending" || c.kyc_status === "unverified").length}`} sub="KYC submitted" accent={Colors.lime} />
       </View>
 
@@ -175,7 +175,7 @@ export default function AdminScreen() {
                     <View style={{ flex: 1, marginLeft: 11 }}>
                       <Text style={styles.cardTitle}>{c.name ?? c.handle ?? "Unknown"}</Text>
                       <Text style={styles.cardMeta}>
-                        KYC: {c.kyc_status ?? "none"} · {c.payout_method ? METHOD_LABELS[c.payout_method] ?? c.payout_method : "no payout method"}
+                        KYC: {c.kyc_status ?? "none"} · Payouts: {c.stripe_payouts_enabled ? "enabled" : "held"}
                       </Text>
                     </View>
                     {ok ? <BadgeCheck size={19} color={Colors.success} /> : null}
@@ -285,7 +285,6 @@ export default function AdminScreen() {
 
       {tab === "payouts" ? (
         <PayoutQueue
-          adminAction={adminAction}
           requests={payoutRequests}
           isLoading={adminLoading}
         />
@@ -411,50 +410,32 @@ function VerificationQueue({
 }
 
 // ─── Payout queue ─────────────────────────────────────────────────────────
-// Platform-managed withdrawals: send the money to the creator's saved
-// destination, then mark it sent (or refund the balance if it bounces).
-
-const METHOD_LABELS: Record<string, string> = {
-  paypal: "PayPal",
-  cashapp: "Cash App",
-  venmo: "Venmo",
-  zelle: "Zelle",
-  bank: "Bank transfer",
-};
+// Stripe-managed payouts — the webhook updates statuses (pending → paid / failed).
+// This view is read-only; admins watch the queue rather than process it manually.
 
 function PayoutQueue({
   requests,
   isLoading,
-  adminAction,
 }: {
   requests: PayoutRequestRow[];
   isLoading: boolean;
-  adminAction: (action: string, payload: Record<string, unknown>) => Promise<{ ok: boolean; error?: string }>;
 }) {
-  const [busy, setBusy] = useState<string | null>(null);
-  const inFlight = requests.filter((r) => r.status === "pending" || r.status === "processing" || r.status === "requested");
+  const inFlight = requests.filter((r) => r.status === "pending" || r.status === "in_transit" || r.status === "requested");
   const settled = requests.filter((r) => r.status === "paid" || r.status === "failed" || r.status === "canceled");
-
-  const run = async (action: string, payoutId: string, extra?: Record<string, unknown>): Promise<void> => {
-    setBusy(payoutId);
-    haptic("medium");
-    await adminAction(action, { payout_id: payoutId, ...extra });
-    setBusy(null);
-  };
 
   return (
     <View style={{ paddingHorizontal: 18, gap: 10, marginTop: 18 }}>
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Withdrawal queue</Text>
+        <Text style={styles.cardTitle}>Stripe payouts</Text>
         <Text style={styles.cardMeta}>
-          {inFlight.length} to send · {formatMoney(inFlight.reduce((s, r) => s + Number(r.amount), 0))} owed
+          {inFlight.length} in flight · {formatMoney(inFlight.reduce((s, r) => s + Number(r.amount), 0))} en route
         </Text>
       </View>
 
       {isLoading ? (
-        <Text style={styles.cardMeta}>Loading withdrawals…</Text>
+        <Text style={styles.cardMeta}>Loading payouts…</Text>
       ) : inFlight.length === 0 ? (
-        <Text style={styles.cardMeta}>No withdrawals waiting. 🎉</Text>
+        <Text style={styles.cardMeta}>No payouts in flight. 🎉</Text>
       ) : (
         inFlight.map((r) => (
           <View key={r.id} style={styles.card}>
@@ -465,7 +446,7 @@ function PayoutQueue({
               <View style={{ flex: 1 }}>
                 <Text style={styles.cardTitle}>{r.name ?? r.handle ?? "Creator"}</Text>
                 <Text style={styles.cardMeta}>
-                  {METHOD_LABELS[r.payout_method ?? ""] ?? "Manual"} · {r.payout_handle ?? "—"}
+                  Stripe · {r.stripe_payout_id ?? "—"}
                 </Text>
                 <Text style={styles.cardMeta}>
                   Requested {r.requested_at ? new Date(r.requested_at).toLocaleDateString() : "—"}
@@ -473,24 +454,9 @@ function PayoutQueue({
               </View>
               <Text style={styles.bigValue}>{formatMoney(Number(r.amount))}</Text>
             </View>
-            <View style={styles.payoutActions}>
-              <PressableScale style={{ flex: 1 }} scaleTo={0.96} onPress={() => void run("mark_payout_paid", r.id)}>
-                <View style={styles.payoutPrimary}>
-                  <Check size={15} color={Colors.ink} />
-                  <Text style={styles.payoutPrimaryText}>{busy === r.id ? "Working…" : "Mark sent"}</Text>
-                </View>
-              </PressableScale>
-              <PressableScale
-                style={{ flex: 1 }}
-                scaleTo={0.96}
-                onPress={() => void run("mark_payout_failed", r.id, { note: "Could not deliver to destination" })}
-              >
-                <View style={styles.payoutSecondary}>
-                  <X size={15} color={Colors.danger} />
-                  <Text style={styles.payoutSecondaryText}>Refund balance</Text>
-                </View>
-              </PressableScale>
-            </View>
+            <Text style={[styles.cardMeta, { color: Colors.gold }]}>
+              {r.status} — Stripe will update this automatically
+            </Text>
           </View>
         ))
       )}
@@ -508,11 +474,9 @@ function PayoutQueue({
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.cardTitle}>{r.name ?? r.handle ?? "Creator"}</Text>
-                    <Text style={styles.cardMeta}>
-                      {METHOD_LABELS[r.payout_method ?? ""] ?? "Manual"} · {formatMoney(Number(r.amount))}
-                    </Text>
-                    {failed && r.admin_note ? (
-                      <Text style={[styles.cardMeta, { color: Colors.danger }]}>{r.admin_note}</Text>
+                    <Text style={styles.cardMeta}>Stripe · {formatMoney(Number(r.amount))}</Text>
+                    {failed && r.failure_reason ? (
+                      <Text style={[styles.cardMeta, { color: Colors.danger }]}>{r.failure_reason}</Text>
                     ) : null}
                   </View>
                   <Text style={[styles.payoutStatus, failed && { color: Colors.danger }]}>
@@ -1009,27 +973,4 @@ const styles = StyleSheet.create({
   },
   // Payout queue
   payoutStatus: { color: Colors.success, fontSize: 11.5, fontWeight: "900" },
-  payoutActions: { flexDirection: "row", gap: 8, marginTop: 12 },
-  payoutPrimary: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    height: 40,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.lime,
-  },
-  payoutPrimaryText: { color: Colors.ink, fontSize: 12.5, fontWeight: "900" },
-  payoutSecondary: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    height: 40,
-    borderRadius: Radius.md,
-    backgroundColor: "rgba(255,71,87,0.1)",
-    borderWidth: 1,
-    borderColor: "rgba(255,71,87,0.3)",
-  },
-  payoutSecondaryText: { color: Colors.danger, fontSize: 12.5, fontWeight: "900" },
 });

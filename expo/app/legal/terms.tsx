@@ -28,7 +28,7 @@ const SECTIONS = [
   },
   {
     title: "6. Payments & fees",
-    body: "POVMe charges a 20% platform fee on all transactions. Creators receive 80% of all subscription, PPV, and tip revenue. Creators withdraw their balance on request (minimum $25) and POVMe sends it to their chosen destination — PayPal, Cash App, Venmo, Zelle or bank transfer — within 1–3 business days. PPV unlocks are non-refundable once the content has been viewed. Subscription renewals can be canceled at any time and remain active until the end of the billing period.",
+    body: "POVMe charges a 20% platform fee on all transactions. Creators receive 80% of all subscription, PPV, and tip revenue. Payouts are processed weekly via Stripe Connect to the creator's linked bank account. PPV unlocks are non-refundable once the content has been viewed. Subscription renewals can be canceled at any time and remain active until the end of the billing period.",
   },
   {
     title: "7. Subscriptions",
