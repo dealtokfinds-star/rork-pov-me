@@ -68,9 +68,12 @@ export default async function handler(req: Request): Promise<Response> {
   const supabase = createUserClient(req);
 
   // Confirm creator status — only creators can go live.
+  // KYC is no longer a gate: creators go live immediately after becoming a
+  // creator. ID upload is optional and only affects the verified badge +
+  // payout review priority (see submit-kyc auto-approval).
   const { data: profile, error: profileErr } = await supabase
     .from("profiles")
-    .select("id, is_creator, kyc_status, handle, name")
+    .select("id, is_creator, handle, name")
     .eq("id", user.userId)
     .single();
   if (profileErr || !profile) {
@@ -78,12 +81,6 @@ export default async function handler(req: Request): Promise<Response> {
   }
   if (!profile.is_creator) {
     return json({ error: "Only creators can go live. Become a creator first." }, 403);
-  }
-  if (profile.kyc_status !== "verified") {
-    return json(
-      { error: "Identity verification (KYC) is required before going live." },
-      403,
-    );
   }
 
   // Co-stream join: verify the primary stream exists and we're invited.

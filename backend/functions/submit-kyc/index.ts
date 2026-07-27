@@ -6,8 +6,11 @@ import { sendEmailInternal } from "../send-email/index.ts";
  * Body: { documents: { front: string, back: string, selfie: string } }
  *
  * Creator submits their KYC documents (already uploaded to the
- * kyc-documents storage bucket via the client). Marks kyc_status='pending',
- * stores the storage paths, and notifies admins.
+ * kyc-documents storage bucket via the client). Auto-approves immediately —
+ * `kyc_status` is set to `verified` on submit so the creator can go live
+ * without waiting for admin review. The admin review queue still receives
+ * the submission (for spot-checks / audits), but it no longer gates
+ * activation.
  *
  * Documents are stored under `kyc-documents/{userId}/{front|back|selfie}.jpg`
  * — the client uploads them directly to Supabase Storage with RLS scoping
@@ -40,13 +43,16 @@ Deno.serve(async (req) => {
     const admin = createAdminClient();
     const now = new Date().toISOString();
 
-    // Update the profile with the document paths and pending status
+    // Auto-approve: set kyc_status to 'verified' immediately so the creator
+    // can go live without waiting for admin review. Admins still receive a
+    // notification for spot-checks, but review no longer gates activation.
     const { error } = await admin.from("profiles").update({
-      kyc_status: "pending",
+      kyc_status: "verified",
       kyc_documents: { front, back, selfie },
       kyc_submitted_at: now,
-      kyc_reviewed_by: null,
-      kyc_reviewed_at: null,
+      kyc_verified_at: now,
+      kyc_reviewed_by: null, // null = system auto-approval
+      kyc_reviewed_at: now,
       kyc_last_reason: null,
       updated_at: now,
     }).eq("id", user.userId);
@@ -87,7 +93,7 @@ Deno.serve(async (req) => {
       console.log("[submit-kyc] admin notify skipped", err);
     }
 
-    return json({ ok: true, kyc_status: "pending" });
+    return json({ ok: true, kyc_status: "verified" });
   } catch (err) {
     if (err instanceof AuthError) return json({ error: err.message }, 401);
     console.error("[submit-kyc] error:", err);

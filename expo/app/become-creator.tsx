@@ -7,21 +7,22 @@ import {
   BadgeCheck,
   Camera,
   Check,
+  ChevronDown,
   ChevronRight,
   CreditCard,
   IdCard,
   Landmark,
   Loader2,
   Mail,
-  RefreshCw,
+  ShieldCheck,
   Upload,
   Wallet,
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -44,9 +45,13 @@ import type { PovCategory } from "@/types";
 
 const PRICE_OPTIONS = [4.99, 7.99, 9.99, 12.99, 14.99, 19.99, 24.99, 29.99, 39.99, 49.99];
 
-type Stage = "identity" | "review" | "payout" | "profile" | "done";
+/** Frictionless flow: identity (optional) → payout → profile (consent-gated) → done. */
+type Stage = "identity" | "payout" | "profile" | "done";
 
 type DocKind = "front" | "back" | "selfie";
+
+const CONSENT_COPY =
+  "I confirm I am 18+ and every person appearing in my POV content is 18+ and has consented to being filmed and broadcast. POVMe is an 18+ platform.";
 
 export default function BecomeCreatorScreen() {
   const router = useRouter();
@@ -63,7 +68,10 @@ export default function BecomeCreatorScreen() {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // KYC documents (local image URIs before upload)
+  /** Whether the optional identity-upload card is expanded. */
+  const [idCardOpen, setIdCardOpen] = useState<boolean>(false);
+
+  // KYC documents (local image URIs before upload) — all optional now.
   const [frontUri, setFrontUri] = useState<string | null>(null);
   const [backUri, setBackUri] = useState<string | null>(null);
   const [selfieUri, setSelfieUri] = useState<string | null>(null);
@@ -75,26 +83,24 @@ export default function BecomeCreatorScreen() {
   const [bankAccount, setBankAccount] = useState<string>("");
   const [bankRouting, setBankRouting] = useState<string>("");
   const [bankCountry, setBankCountry] = useState<string>("");
+  const [consentAgreed, setConsentAgreed] = useState<boolean>(false);
 
-  // Pull existing KYC state on mount so returning creators don't re-verify.
+  // Pull existing state on mount so returning creators skip what they've done.
   const loadKyc = useCallback(async (): Promise<void> => {
     try {
       const state = await fetchKycState();
       if (!state) return;
       setKyc(state);
-      if (state.kycStatus === "verified") {
-        setStage(state.payoutMethod ? "profile" : "payout");
-      } else if (state.kycStatus === "pending") {
-        setStage("review");
-      } else if (state.kycStatus === "rejected") {
-        setStage("identity");
-        setError(state.kycLastReason ?? "Please resubmit your ID photos");
-      }
+      // KYC no longer gates anything; just prefill payout method if present.
       if (state.payoutMethod) {
         setPayoutMethod(state.payoutMethod);
+        setStage("profile");
         if (state.payoutMethod === "paypal" && state.payoutPaypalEmail) {
           setPaypalEmail(state.payoutPaypalEmail);
         }
+      } else if (state.kycStatus === "verified") {
+        // Already verified but no payout details yet.
+        setStage("payout");
       }
     } catch (err) {
       console.log("[povme] loadKyc:", err);
@@ -120,9 +126,10 @@ export default function BecomeCreatorScreen() {
     else setSelfieUri(uri);
   }, []);
 
+  /** Submit the optional ID upload. Auto-approves on the backend → verified instantly. */
   const handleSubmitKyc = useCallback(async (): Promise<void> => {
     if (!frontUri || !backUri || !selfieUri) {
-      setError("Capture all three photos to continue.");
+      setError("Capture all three photos to submit.");
       return;
     }
     setLoading(true);
@@ -130,15 +137,23 @@ export default function BecomeCreatorScreen() {
     try {
       await submitKyc({ frontUri, backUri, selfieUri });
       haptic("success");
-      setStage("review");
       const updated = await fetchKycState();
       if (updated) setKyc(updated);
+      // Auto-approved → straight to payout. No review stage.
+      setStage("payout");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't submit your documents");
     } finally {
       setLoading(false);
     }
   }, [frontUri, backUri, selfieUri]);
+
+  /** Skip ID upload entirely and jump to payout details. */
+  const handleSkipIdentity = useCallback((): void => {
+    haptic("light");
+    setError(null);
+    setStage("payout");
+  }, []);
 
   const handleSavePayout = useCallback(async (): Promise<void> => {
     if (!payoutMethod) {
@@ -187,6 +202,10 @@ export default function BecomeCreatorScreen() {
       setError("Pick at least one POV category.");
       return;
     }
+    if (!consentAgreed) {
+      setError("Tick the 18+ consent box to publish your profile.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -205,7 +224,7 @@ export default function BecomeCreatorScreen() {
     } finally {
       setLoading(false);
     }
-  }, [identity, picked, price, queryClient, user?.id]);
+  }, [identity, picked, price, consentAgreed, queryClient, user?.id]);
 
   // ---- Done state ----
   if (stage === "done" || step === 4) {
@@ -216,9 +235,10 @@ export default function BecomeCreatorScreen() {
         </View>
         <Text style={styles.doneTitle}>You&apos;re a povme creator.</Text>
         <Text style={styles.doneBody}>
-          Identity verified, payouts connected, and your studio is live. Upload your first POV
-          episode, set your access levels, and go live whenever you&apos;re ready. Payouts run
-          weekly to your {payoutMethod === "paypal" ? "PayPal" : "bank account"}.
+          Your studio is live. Upload your first POV episode, set your access levels, and go live
+          whenever you&apos;re ready. Payouts run weekly to your{" "}
+          {payoutMethod === "paypal" ? "PayPal" : "bank account"}.
+          {kyc?.kycStatus === "verified" ? " Identity verified — you have the badge." : ""}
         </Text>
         <View style={styles.summary}>
           <SummaryRow label="Identity" value={identity || "Verified creator"} />
@@ -228,7 +248,11 @@ export default function BecomeCreatorScreen() {
             label="Payouts"
             value={payoutMethod === "paypal" ? "PayPal · weekly" : "Bank transfer · weekly"}
           />
-          <SummaryRow label="Status" value="Approved" />
+          <SummaryRow
+            label="Verified"
+            value={kyc?.kycStatus === "verified" ? "Yes — badge on" : "Skipped (add later)"}
+          />
+          <SummaryRow label="Status" value="Live" />
         </View>
         <Button label="Open creator studio" onPress={() => router.replace("/(tabs)/studio")} style={{ marginTop: 24 }} />
         <Button label="Upload first episode" variant="dark" onPress={() => router.replace("/upload")} style={{ marginTop: 10 }} />
@@ -236,7 +260,7 @@ export default function BecomeCreatorScreen() {
     );
   }
 
-  // ---- Live KYC + payout flow (step 3) ----
+  // ---- Live identity + payout flow (step 3) ----
   if (step === 3) {
     return (
       <KeyboardAvoidingView
@@ -249,11 +273,11 @@ export default function BecomeCreatorScreen() {
         >
           <ProgressBar progress={progressFor(stage)} />
           <Text style={styles.step}>{stageLabel(stage)}</Text>
-          <Text style={styles.title}>Verify &amp; set up payouts</Text>
+          <Text style={styles.title}>Set up payouts &amp; go live</Text>
           <Text style={styles.body}>
-            Upload a government ID and a selfie so we can confirm you&apos;re 18+. Then add your
-            payout details — povme pays you weekly via PayPal or bank transfer. Your documents are
-            stored privately and reviewed by a human within 24 hours.
+            Add how you want to get paid — povme pays you weekly via PayPal or bank transfer. ID
+            upload is optional: verified creators get a badge and faster payout reviews. You can
+            skip it and verify later.
           </Text>
 
           {error ? (
@@ -263,79 +287,84 @@ export default function BecomeCreatorScreen() {
             </View>
           ) : null}
 
-          {/* ---- Stage: identity upload ---- */}
+          {/* ---- Stage: identity (optional) ---- */}
           {stage === "identity" ? (
             <View style={{ gap: 14, marginTop: 14 }}>
-              <DocPicker
-                label="Front of ID"
-                sub="Driver's license, passport, or national ID"
-                icon={<IdCard size={18} color={Colors.lime} />}
-                uri={frontUri}
-                onPick={() => pickImage("front")}
-              />
-              <DocPicker
-                label="Back of ID"
-                sub="If your ID has a back side"
-                icon={<CreditCard size={18} color={Colors.cyan} />}
-                uri={backUri}
-                onPick={() => pickImage("back")}
-              />
-              <DocPicker
-                label="Selfie holding ID"
-                sub="Hold your ID next to your face"
-                icon={<Camera size={18} color={Colors.magenta} />}
-                uri={selfieUri}
-                onPick={() => pickImage("selfie")}
-              />
+              {/* Optional identity verification card */}
+              <PressableScale onPress={() => { setIdCardOpen((v) => !v); haptic("light"); }} scaleTo={0.99}>
+                <View style={styles.optionalCard}>
+                  <View style={styles.optionalHeader}>
+                    <View style={styles.optionalIcon}>
+                      <ShieldCheck size={18} color={Colors.lime} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.optionalTitle}>Verify your identity (optional)</Text>
+                      <Text style={styles.optionalSub}>
+                        Verified creators get a badge and faster payout reviews. Skip and verify
+                        later if you want.
+                      </Text>
+                    </View>
+                    <ChevronDown
+                      size={18}
+                      color={Colors.textDim}
+                      style={{ transform: [{ rotate: idCardOpen ? "180deg" : "0deg" }] }}
+                    />
+                  </View>
 
-              <Button
-                label={loading ? "Submitting…" : "Submit for review"}
-                onPress={handleSubmitKyc}
-                disabled={loading || !frontUri || !backUri || !selfieUri}
-                icon={loading ? <Loader2 size={16} color={Colors.ink} /> : undefined}
-                style={{ marginTop: 8 }}
-              />
-            </View>
-          ) : null}
-
-          {/* ---- Stage: under review ---- */}
-          {stage === "review" ? (
-            <View style={{ gap: 14, marginTop: 14 }}>
-              <View style={styles.reviewCard}>
-                <View style={styles.reviewIcon}>
-                  <Loader2 size={22} color={Colors.lime} />
-                </View>
-                <Text style={styles.reviewTitle}>Under review</Text>
-                <Text style={styles.reviewBody}>
-                  Your documents were submitted. A human reviews every application — usually within
-                  24 hours. You&apos;ll get an email when you&apos;re approved.
-                </Text>
-              </View>
-              <PressableScale
-                onPress={() => {
-                  void loadKyc();
-                  haptic("light");
-                }}
-                scaleTo={0.97}
-              >
-                <View style={styles.retryRow}>
-                  <RefreshCw size={13} color={Colors.textDim} />
-                  <Text style={styles.retryText}>Re-check status</Text>
+                  {idCardOpen ? (
+                    <View style={styles.optionalBody}>
+                      <DocPicker
+                        label="Front of ID"
+                        sub="Driver's license, passport, or national ID"
+                        icon={<IdCard size={18} color={Colors.lime} />}
+                        uri={frontUri}
+                        onPick={() => pickImage("front")}
+                      />
+                      <DocPicker
+                        label="Back of ID"
+                        sub="If your ID has a back side"
+                        icon={<CreditCard size={18} color={Colors.cyan} />}
+                        uri={backUri}
+                        onPick={() => pickImage("back")}
+                      />
+                      <DocPicker
+                        label="Selfie holding ID"
+                        sub="Hold your ID next to your face"
+                        icon={<Camera size={18} color={Colors.magenta} />}
+                        uri={selfieUri}
+                        onPick={() => pickImage("selfie")}
+                      />
+                      <Button
+                        label={loading ? "Submitting…" : "Submit for review (optional)"}
+                        onPress={handleSubmitKyc}
+                        disabled={loading || !frontUri || !backUri || !selfieUri}
+                        icon={loading ? <Loader2 size={16} color={Colors.ink} /> : undefined}
+                        style={{ marginTop: 4 }}
+                      />
+                    </View>
+                  ) : null}
                 </View>
               </PressableScale>
-              {kyc?.kycStatus === "verified" ? (
-                <Button
-                  label="Continue to payouts"
-                  onPress={() => setStage("payout")}
-                  icon={<ChevronRight size={18} color={Colors.ink} />}
-                />
-              ) : null}
+
+              <Button
+                label="Skip — continue to payouts"
+                variant="dark"
+                onPress={handleSkipIdentity}
+                icon={<ChevronRight size={18} color={Colors.ink} />}
+                style={{ marginTop: 4 }}
+              />
             </View>
           ) : null}
 
           {/* ---- Stage: payout details ---- */}
           {stage === "payout" ? (
             <View style={{ gap: 14, marginTop: 14 }}>
+              {kyc?.kycStatus === "verified" ? (
+                <View style={styles.doneRow}>
+                  <Check size={14} color={Colors.success} />
+                  <Text style={styles.doneText}>Identity verified — badge is on</Text>
+                </View>
+              ) : null}
               <Text style={styles.sectionLabel}>How do you want to get paid?</Text>
               <View style={styles.methodRow}>
                 <MethodOption
@@ -427,33 +456,46 @@ export default function BecomeCreatorScreen() {
             </View>
           ) : null}
 
-          {/* ---- Stage: publish profile ---- */}
+          {/* ---- Stage: publish profile (consent-gated) ---- */}
           {stage === "profile" ? (
             <View style={{ gap: 14, marginTop: 14 }}>
-              <View style={styles.doneRow}>
-                <Check size={14} color={Colors.success} />
-                <Text style={styles.doneText}>Identity verified</Text>
-              </View>
               <View style={styles.doneRow}>
                 <Check size={14} color={Colors.success} />
                 <Text style={styles.doneText}>
                   Payouts via {payoutMethod === "paypal" ? "PayPal" : "bank transfer"} · weekly
                 </Text>
               </View>
+              {kyc?.kycStatus === "verified" ? (
+                <View style={styles.doneRow}>
+                  <Check size={14} color={Colors.success} />
+                  <Text style={styles.doneText}>Identity verified — badge is on</Text>
+                </View>
+              ) : (
+                <View style={styles.doneRow}>
+                  <Text style={styles.doneTextDim}>Identity not verified — add it any time</Text>
+                </View>
+              )}
+
+              {/* Consent checkbox */}
+              <Pressable
+                onPress={() => { setConsentAgreed((v) => !v); haptic("light"); }}
+                style={styles.consentRow}
+              >
+                <View style={[styles.checkbox, consentAgreed && styles.checkboxActive]}>
+                  {consentAgreed ? <Check size={14} color={Colors.ink} /> : null}
+                </View>
+                <Text style={styles.consentText}>{CONSENT_COPY}</Text>
+              </Pressable>
+
               <Button
-                label="Finish & open studio"
+                label={loading ? "Publishing…" : "Finish & open studio"}
                 onPress={handlePublish}
-                disabled={loading}
+                disabled={loading || !consentAgreed}
                 icon={loading ? <Loader2 size={16} color={Colors.ink} /> : undefined}
                 style={{ marginTop: 8 }}
               />
             </View>
           ) : null}
-
-          <Text style={styles.legal}>
-            By continuing you accept the povme creator terms, the content guidelines, and confirm
-            every person appearing in your POV content is 18+ and has consented to being filmed.
-          </Text>
         </ScrollView>
       </KeyboardAvoidingView>
     );
@@ -537,7 +579,7 @@ export default function BecomeCreatorScreen() {
             </Text>
           </View>
           <Button
-            label="Continue to verification"
+            label="Continue to payouts"
             onPress={() => setStep(3)}
             icon={<ChevronRight size={18} color={Colors.ink} />}
           />
@@ -550,8 +592,7 @@ export default function BecomeCreatorScreen() {
 function progressFor(stage: Stage): number {
   switch (stage) {
     case "identity": return 0.55;
-    case "review": return 0.7;
-    case "payout": return 0.85;
+    case "payout": return 0.8;
     case "profile": return 0.95;
     case "done": return 1;
   }
@@ -559,8 +600,7 @@ function progressFor(stage: Stage): number {
 
 function stageLabel(stage: Stage): string {
   switch (stage) {
-    case "identity": return "UPLOAD ID";
-    case "review": return "UNDER REVIEW";
+    case "identity": return "IDENTITY (OPTIONAL)";
     case "payout": return "PAYOUT DETAILS";
     case "profile": return "PUBLISH PROFILE";
     case "done": return "DONE";
@@ -708,7 +748,26 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   errorText: { flex: 1, color: Colors.danger, fontSize: 13, fontWeight: "600" },
-  legal: { color: Colors.textDim, fontSize: 11, fontWeight: "600", lineHeight: 17, marginTop: 14 },
+  // Optional identity card
+  optionalCard: {
+    borderRadius: Radius.md,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 14,
+  },
+  optionalHeader: { flexDirection: "row", alignItems: "center", gap: 12 },
+  optionalIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(204,255,0,0.14)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  optionalTitle: { color: Colors.text, fontSize: 14, fontWeight: "800" },
+  optionalSub: { color: Colors.textDim, fontSize: 11.5, fontWeight: "600", marginTop: 3, lineHeight: 16 },
+  optionalBody: { marginTop: 12, gap: 10 },
   // Doc picker
   docBox: {
     flexDirection: "row",
@@ -744,28 +803,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  // Review card
-  reviewCard: {
-    padding: 20,
-    borderRadius: Radius.md,
-    backgroundColor: "rgba(204,255,0,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(204,255,0,0.22)",
-    alignItems: "center",
-    gap: 10,
-  },
-  reviewIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(204,255,0,0.14)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  reviewTitle: { color: Colors.text, fontSize: 18, fontWeight: "900" },
-  reviewBody: { color: Colors.textMid, fontSize: 13, fontWeight: "500", textAlign: "center", lineHeight: 19 },
-  retryRow: { flexDirection: "row", alignItems: "center", gap: 7, justifyContent: "center", marginTop: 6 },
-  retryText: { color: Colors.textDim, fontSize: 12, fontWeight: "700" },
   // Payout method
   methodRow: { flexDirection: "row", gap: 10 },
   methodCard: {
@@ -794,6 +831,21 @@ const styles = StyleSheet.create({
   secureNote: { color: Colors.textDim, fontSize: 11, fontWeight: "600", marginTop: 4 },
   doneRow: { flexDirection: "row", alignItems: "center", gap: 7 },
   doneText: { color: Colors.success, fontSize: 12.5, fontWeight: "700" },
+  doneTextDim: { color: Colors.textDim, fontSize: 12.5, fontWeight: "600" },
+  // Consent checkbox
+  consentRow: { flexDirection: "row", alignItems: "flex-start", gap: 11, padding: 14, borderRadius: Radius.md, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, marginTop: 4 },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: Colors.borderHi,
+    backgroundColor: Colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkboxActive: { backgroundColor: Colors.lime, borderColor: Colors.lime },
+  consentText: { flex: 1, color: Colors.textMid, fontSize: 12.5, fontWeight: "600", lineHeight: 18 },
   // Done
   doneWrap: { padding: 24, paddingTop: 50, alignItems: "center" },
   doneIcon: {

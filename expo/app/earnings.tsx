@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
-import { Banknote, Check, Clock, Landmark, RefreshCw, TrendingUp } from "lucide-react-native";
+import { Banknote, Check, Clock, Landmark, RefreshCw, TrendingUp, Wallet } from "lucide-react-native";
 import React, { useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -23,7 +23,7 @@ export default function EarningsScreen() {
   const [payoutError, setPayoutError] = useState<string | null>(null);
   const [withdrawing, setWithdrawing] = useState<boolean>(false);
 
-  // Real Stripe Connect balance via edge function
+  // Real creator balance via edge function (Lemon Squeezy MoR mode).
   const { data: balance, isLoading, refetch } = useQuery<CreatorBalance>({
     queryKey: ["creator-balance"],
     queryFn: fetchCreatorBalance,
@@ -35,6 +35,19 @@ export default function EarningsScreen() {
   const lifetime = balance?.lifetime_earnings ?? creatorStats.gross;
   const payoutsEnabled = balance?.payouts_enabled ?? false;
   const payouts = balance?.payouts ?? [];
+  const payoutMethodLabel = balance?.payout_method_label ?? null;
+  const payoutMethod = balance?.payout_method ?? null;
+
+  // LS-aware label for the payout-destination card.
+  const destinationLabel: string = payoutsEnabled
+    ? (payoutMethodLabel ?? "Payout details on file")
+    : "Add payout details in Become a Creator";
+  const destinationSub: string = payoutsEnabled
+    ? "Weekly payouts · povme pays you via Lemon Squeezy"
+    : "Add payout details in Become a Creator to withdraw earnings";
+  const destinationIcon = payoutMethod === "paypal"
+    ? <Wallet size={18} color={Colors.success} />
+    : <Landmark size={18} color={Colors.success} />;
 
   const handleWithdraw = async (): Promise<void> => {
     setWithdrawing(true);
@@ -83,7 +96,7 @@ export default function EarningsScreen() {
           </View>
         ) : payoutsEnabled ? (
           <Button
-            label={withdrawing ? "Processing…" : "Withdraw to bank"}
+            label={withdrawing ? "Processing…" : "Withdraw to payout account"}
             icon={<Banknote size={16} color={Colors.ink} />}
             onPress={() => void handleWithdraw()}
             disabled={withdrawing || available < 1}
@@ -92,7 +105,7 @@ export default function EarningsScreen() {
         ) : (
           <View style={styles.disabledBox}>
             <Text style={styles.disabledText}>
-              Payouts not enabled — complete Stripe Connect onboarding to withdraw earnings.
+              Add payout details in Become a Creator to withdraw earnings.
             </Text>
           </View>
         )}
@@ -124,15 +137,11 @@ export default function EarningsScreen() {
       <SectionHeader kicker="Destination" title="Payout account" />
       <View style={styles.accountCard}>
         <View style={styles.accountIcon}>
-          <Landmark size={18} color={payoutsEnabled ? Colors.success : Colors.textDim} />
+          {payoutsEnabled ? destinationIcon : <Landmark size={18} color={Colors.textDim} />}
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.accountLabel}>
-            {payoutsEnabled ? "Stripe Connect · Active" : "Stripe Connect · Not set up"}
-          </Text>
-          <Text style={styles.accountSub}>
-            {payoutsEnabled ? "Weekly automatic payouts · KYC verified" : "Complete onboarding in Become a Creator"}
-          </Text>
+          <Text style={styles.accountLabel}>{destinationLabel}</Text>
+          <Text style={styles.accountSub}>{destinationSub}</Text>
         </View>
         {payoutsEnabled ? <Check size={17} color={Colors.success} /> : null}
       </View>
@@ -163,9 +172,8 @@ export default function EarningsScreen() {
 
       <PressableScale>
         <Text style={styles.legal}>
-          povme keeps 20% of gross revenue. Taxes are your responsibility — download your 1099 or
-          annual statement from Settings once the year closes. Stripe handles 1099-K generation
-          for eligible accounts automatically.
+          povme keeps 20% of gross. Lemon Squeezy handles tax remittance on fan payments.
+          Payouts run weekly to your saved PayPal or bank account.
         </Text>
       </PressableScale>
     </ScrollView>

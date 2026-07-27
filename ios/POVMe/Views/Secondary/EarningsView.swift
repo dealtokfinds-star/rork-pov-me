@@ -97,19 +97,20 @@ struct EarningsView: View {
             HStack {
                 Text("Payout method").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.textDim)
                 Spacer()
-                Text(app.payoutConnected ? "Stripe Connect · Verified" : "Not connected")
+                Text(app.payoutConnected ? "PayPal / Bank · via Lemon Squeezy" : "Add payout details in Become a Creator")
                     .font(.system(size: 13, weight: .heavy))
                     .foregroundStyle(app.payoutConnected ? Theme.lime : Theme.danger)
+                    .multilineTextAlignment(.trailing)
             }
             HStack {
                 Text("Minimum payout").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.textDim)
                 Spacer()
-                Text("$50.00").font(.system(size: 14, weight: .heavy)).foregroundStyle(Theme.text)
+                Text("$1.00").font(.system(size: 14, weight: .heavy)).foregroundStyle(Theme.text)
             }
             HStack {
                 Text("Payout schedule").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.textDim)
                 Spacer()
-                Text("Weekly · Fridays").font(.system(size: 14, weight: .heavy)).foregroundStyle(Theme.text)
+                Text("Weekly · PayPal or bank").font(.system(size: 14, weight: .heavy)).foregroundStyle(Theme.text)
             }
         }
         .padding(18)
@@ -152,9 +153,9 @@ struct EarningsView: View {
 
     private var complianceCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            complianceRow("checkmark.shield.fill", Theme.lime, "Identity verified", "Stripe Connect KYC complete")
-            complianceRow("doc.text.fill", Theme.cyan, "Tax forms", "W-9 on file · 1099 generated at year end")
-            complianceRow("globe.fill", Theme.gold, "Stripe Tax", "Sales tax handled automatically per region")
+            complianceRow("checkmark.shield.fill", Theme.lime, "Payouts via Lemon Squeezy", "MoR handles tax remittance on fan payments")
+            complianceRow("percent", Theme.cyan, "Platform fee", "povme keeps 20% of gross")
+            complianceRow("banknote.fill", Theme.gold, "Weekly payouts", "To your saved PayPal or bank account")
         }
         .padding(18)
         .background(Theme.surface)
@@ -179,7 +180,7 @@ struct EarningsView: View {
     }
 
     private func processPayout() {
-        guard app.creatorStats.net >= 50 else { return }
+        guard app.creatorStats.net >= 1 else { return }
         processing = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             processing = false

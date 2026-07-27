@@ -1,24 +1,26 @@
 import SwiftUI
 import PhotosUI
 
-/// Become a creator — manual KYC (ID upload + admin review) + payout details.
+/// Become a creator — frictionless onboarding.
 ///
-/// Mirrors the Expo `app/become-creator.tsx` 4-step flow:
+/// Mirrors the Expo `app/become-creator.tsx` flow:
 ///  1. Identity tag + categories
 ///  2. Price
-///  3. Verify & payouts: upload ID front/back/selfie → submit for review →
-///     save payout details (PayPal or bank) → publish profile.
+///  3. Set up payouts & go live: optional ID upload (collapsible, auto-approved
+///     on submit) → payout details (PayPal or bank) → publish profile
+///     (gated by an 18+/consent checkbox).
 ///  4. Done.
 ///
-/// Replaces the old Stripe Identity + Stripe Connect onboarding. Lemon
-/// Squeezy is the Merchant of Record for fan payments; the platform pays
+/// KYC no longer gates going live. ID upload is optional and only affects the
+/// verified badge + payout review priority. The admin review queue still
+/// receives submissions for spot-checks but no longer blocks activation.
+/// Lemon Squeezy is the Merchant of Record for fan payments; the platform pays
 /// creators weekly via PayPal or bank transfer using the details saved here.
 struct BecomeCreatorView: View {
     @Environment(AppState.self) private var app
     @Environment(Router.self) private var router
     @State private var price = "12.99"
     @State private var step = 0
-    @State private var agreed = false
     @State private var processing = false
     @State private var success = false
     @State private var error: String?
@@ -27,7 +29,8 @@ struct BecomeCreatorView: View {
     @State private var identity = ""
     @State private var pickedCategories: Set<PovCategory> = []
 
-    // Step 3: KYC documents + payout details
+    // Step 3: optional KYC + payout details
+    @State private var idCardOpen = false
     @State private var frontItem: PhotosPickerItem?
     @State private var backItem: PhotosPickerItem?
     @State private var selfieItem: PhotosPickerItem?
@@ -42,8 +45,11 @@ struct BecomeCreatorView: View {
     @State private var bankAccount = ""
     @State private var bankRouting = ""
     @State private var bankCountry = ""
+    @State private var consentAgreed = false
 
-    enum KycStage { case identity, review, payout, profile }
+    enum KycStage { case identity, payout, profile }
+
+    private let consentCopy = "I confirm I am 18+ and every person appearing in my POV content is 18+ and has consented to being filmed and broadcast. POVMe is an 18+ platform."
 
     var body: some View {
         ScrollView {
@@ -183,23 +189,23 @@ struct BecomeCreatorView: View {
             .clipShape(.rect(cornerRadius: Theme.rMd))
 
             Spacer(minLength: 20)
-            AppButton(label: "Continue to verification") { step = 3 }
+            AppButton(label: "Continue to payouts") { step = 3 }
             backButton(to: 1)
         }
     }
 
-    // MARK: - Step 3: verify & payouts
+    // MARK: - Step 3: payouts & go live
 
     private var verifyStep: some View {
         VStack(alignment: .leading, spacing: 16) {
             ProgressBar(progress: progressFor(kycStage))
                 .padding(.bottom, 8)
             Text(stageLabel(kycStage)).microLabel(Theme.lime, size: 11)
-            Text("Verify & set up payouts")
+            Text("Set up payouts & go live")
                 .font(.system(size: 28, weight: .heavy))
                 .tracking(-1.1)
                 .foregroundStyle(Theme.text)
-            Text("Upload a government ID and a selfie so we can confirm you're 18+. Then add your payout details — povme pays you weekly via PayPal or bank transfer. Your documents are stored privately and reviewed by a human within 24 hours.")
+            Text("Add how you want to get paid — povme pays you weekly via PayPal or bank transfer. ID upload is optional: verified creators get a badge and faster payout reviews. You can skip it and verify later.")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Theme.textMid)
                 .lineSpacing(7)
@@ -216,68 +222,75 @@ struct BecomeCreatorView: View {
             }
 
             switch kycStage {
-            case .identity: identityUpload
-            case .review: reviewState
+            case .identity: identityStage
             case .payout: payoutForm
             case .profile: publishState
             }
-
-            Text("By continuing you accept the povme creator terms, the content guidelines, and confirm every person appearing in your POV content is 18+ and has consented to being filmed.")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Theme.textDim)
-                .lineSpacing(5)
-                .padding(.top, 8)
         }
     }
 
-    private var identityUpload: some View {
+    // MARK: Identity (optional)
+
+    @ViewBuilder private var identityStage: some View {
         VStack(alignment: .leading, spacing: 14) {
-            docPicker(label: "Front of ID", sub: "Driver's license, passport, or national ID", icon: "doc.fill", item: $frontItem, image: $frontImage)
-            docPicker(label: "Back of ID", sub: "If your ID has a back side", icon: "creditcard.fill", item: $backItem, image: $backImage)
-            docPicker(label: "Selfie holding ID", sub: "Hold your ID next to your face", icon: "faceid", item: $selfieItem, image: $selfieImage)
-
-            AppButton(label: processing ? "Submitting…" : "Submit for review", disabled: processing || frontImage == nil || backImage == nil || selfieImage == nil) {
-                Task { await submitKyc() }
-            }
-        }
-    }
-
-    private var reviewState: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(spacing: 10) {
-                ProgressView().tint(Theme.lime).scaleEffect(1.2)
-                Text("Under review").font(.system(size: 18, weight: .heavy)).foregroundStyle(Theme.text)
-                Text("Your documents were submitted. A human reviews every application — usually within 24 hours. You'll get an email when you're approved.")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.textMid)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(5)
-            }
-            .padding(20)
-            .background(Theme.lime.opacity(0.06))
-            .overlay(RoundedRectangle(cornerRadius: Theme.rMd).stroke(Theme.lime.opacity(0.22), lineWidth: 1))
-            .clipShape(.rect(cornerRadius: Theme.rMd))
-
-            PressableButton(scaleTo: 0.97) {
-                Task { await loadKycState() }
+            // Collapsible optional identity card
+            PressableButton(scaleTo: 0.99) {
+                withAnimation(.easeInOut(duration: 0.2)) { idCardOpen.toggle() }
+                Hap.light()
             } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "arrow.clockwise").font(.system(size: 13))
-                    Text("Re-check status").font(.system(size: 12, weight: .bold))
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle().fill(Theme.lime.opacity(0.14)).frame(width: 36, height: 36)
+                            Image(systemName: "checkmark.shield.fill").font(.system(size: 16)).foregroundStyle(Theme.lime)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Verify your identity (optional)")
+                                .font(.system(size: 14, weight: .heavy)).foregroundStyle(Theme.text)
+                            Text("Verified creators get a badge and faster payout reviews. Skip and verify later if you want.")
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundStyle(Theme.textDim)
+                                .lineSpacing(4)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(Theme.textDim)
+                            .rotationEffect(.degrees(idCardOpen ? 180 : 0))
+                    }
+                    if idCardOpen {
+                        VStack(alignment: .leading, spacing: 10) {
+                            docPicker(label: "Front of ID", sub: "Driver's license, passport, or national ID", icon: "doc.fill", item: $frontItem, image: $frontImage)
+                            docPicker(label: "Back of ID", sub: "If your ID has a back side", icon: "creditcard.fill", item: $backItem, image: $backImage)
+                            docPicker(label: "Selfie holding ID", sub: "Hold your ID next to your face", icon: "faceid", item: $selfieItem, image: $selfieImage)
+                            AppButton(label: processing ? "Submitting…" : "Submit for review (optional)", disabled: processing || frontImage == nil || backImage == nil || selfieImage == nil) {
+                                Task { await submitKyc() }
+                            }
+                            .padding(.top, 2)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
-                .foregroundStyle(Theme.textDim)
-                .frame(maxWidth: .infinity)
+                .padding(14)
+                .background(Theme.surface)
+                .overlay(RoundedRectangle(cornerRadius: Theme.rMd).stroke(Theme.border, lineWidth: 1))
+                .clipShape(.rect(cornerRadius: Theme.rMd))
             }
             .buttonStyle(.plain)
 
-            if kycState?.kycStatus == "verified" {
-                AppButton(label: "Continue to payouts") { kycStage = .payout }
+            AppButton(label: "Skip — continue to payouts", variant: .dark) {
+                error = nil
+                kycStage = .payout
+                Hap.light()
             }
         }
     }
 
-    private var payoutForm: some View {
+    @ViewBuilder private var payoutForm: some View {
         VStack(alignment: .leading, spacing: 14) {
+            if kycState?.kycStatus == "verified" {
+                doneRow("Identity verified — badge is on")
+            }
             Text("How do you want to get paid?")
                 .font(.system(size: 15, weight: .heavy))
                 .foregroundStyle(Theme.text)
@@ -321,11 +334,48 @@ struct BecomeCreatorView: View {
         }
     }
 
-    private var publishState: some View {
+    @ViewBuilder private var publishState: some View {
         VStack(alignment: .leading, spacing: 14) {
-            doneRow("Identity verified")
             doneRow("Payouts via \(payoutMethod == .paypal ? "PayPal" : "bank transfer") · weekly")
-            AppButton(label: processing ? "Publishing…" : "Finish & open studio", disabled: processing) {
+            if kycState?.kycStatus == "verified" {
+                doneRow("Identity verified — badge is on")
+            } else {
+                HStack(spacing: 7) {
+                    Image(systemName: "info.circle").font(.system(size: 12)).foregroundStyle(Theme.textDim)
+                    Text("Identity not verified — add it any time")
+                        .font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Theme.textDim)
+                }
+            }
+
+            // Consent checkbox gates publish
+            PressableButton(scaleTo: 0.98) {
+                consentAgreed.toggle()
+                Hap.light()
+            } label: {
+                HStack(alignment: .top, spacing: 11) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(consentAgreed ? Theme.lime : Theme.surface)
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(consentAgreed ? Theme.lime : Theme.borderHi, lineWidth: 1.5))
+                            .frame(width: 22, height: 22)
+                        if consentAgreed {
+                            Image(systemName: "checkmark").font(.system(size: 12, weight: .heavy)).foregroundStyle(Theme.ink)
+                        }
+                    }
+                    Text(consentCopy)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(Theme.textMid)
+                        .lineSpacing(5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(14)
+                .background(Theme.surface)
+                .overlay(RoundedRectangle(cornerRadius: Theme.rMd).stroke(consentAgreed ? Theme.lime.opacity(0.4) : Theme.border, lineWidth: 1))
+                .clipShape(.rect(cornerRadius: Theme.rMd))
+            }
+            .buttonStyle(.plain)
+
+            AppButton(label: processing ? "Publishing…" : "Finish & open studio", disabled: processing || !consentAgreed) {
                 Task { await publishProfile() }
             }
         }
@@ -350,7 +400,7 @@ struct BecomeCreatorView: View {
                 .tracking(-1)
                 .foregroundStyle(Theme.text)
                 .multilineTextAlignment(.center)
-            Text("Your channel is live. Upload your first POV episode or go live from a body cam right now. Payouts run weekly to your \(payoutMethod == .paypal ? "PayPal" : "bank account").")
+            Text("Your channel is live. Upload your first POV episode or go live from a body cam right now. Payouts run weekly to your \(payoutMethod == .paypal ? "PayPal" : "bank account").\(kycState?.kycStatus == "verified" ? " Identity verified — you have the badge." : "")")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Theme.textMid)
                 .multilineTextAlignment(.center)
@@ -371,14 +421,12 @@ struct BecomeCreatorView: View {
         do {
             if let state = try await CreatorOnboardingClient.shared.fetchKycState() {
                 kycState = state
-                if state.kycStatus == "verified" {
-                    kycStage = state.payoutMethod != nil ? .profile : .payout
-                    if let m = state.payoutMethod { payoutMethod = PayoutDetailsInput.Method(rawValue: m) }
-                } else if state.kycStatus == "pending" {
-                    kycStage = .review
-                } else if state.kycStatus == "rejected" {
-                    kycStage = .identity
-                    error = state.kycLastReason ?? "Please resubmit your ID photos"
+                // KYC no longer gates anything; just prefill payout method if present.
+                if let m = state.payoutMethod {
+                    payoutMethod = PayoutDetailsInput.Method(rawValue: m)
+                    kycStage = .profile
+                } else if state.kycStatus == "verified" {
+                    kycStage = .payout
                 }
             }
         } catch {
@@ -388,7 +436,7 @@ struct BecomeCreatorView: View {
 
     private func submitKyc() async {
         guard let frontImage, let backImage, let selfieImage else {
-            error = "Capture all three photos to continue."
+            error = "Capture all three photos to submit."
             return
         }
         processing = true
@@ -396,8 +444,9 @@ struct BecomeCreatorView: View {
         do {
             _ = try await CreatorOnboardingClient.shared.submitKyc(front: frontImage, back: backImage, selfie: selfieImage)
             Hap.success()
-            kycStage = .review
-            await loadKycState()
+            // Auto-approved by the backend → straight to payout. No review stage.
+            if let state = try? await CreatorOnboardingClient.shared.fetchKycState() { kycState = state }
+            kycStage = .payout
         } catch {
             self.error = error.localizedDescription
         }
@@ -433,6 +482,9 @@ struct BecomeCreatorView: View {
         guard !pickedCategories.isEmpty else {
             error = "Pick at least one POV category."; return
         }
+        guard consentAgreed else {
+            error = "Tick the 18+ consent box to publish your profile."; return
+        }
         processing = true
         error = nil
         let p = Double(price) ?? 12.99
@@ -447,16 +499,14 @@ struct BecomeCreatorView: View {
     private func progressFor(_ stage: KycStage) -> Double {
         switch stage {
         case .identity: return 0.55
-        case .review: return 0.7
-        case .payout: return 0.85
+        case .payout: return 0.8
         case .profile: return 0.95
         }
     }
 
     private func stageLabel(_ stage: KycStage) -> String {
         switch stage {
-        case .identity: return "UPLOAD ID"
-        case .review: return "UNDER REVIEW"
+        case .identity: return "IDENTITY (OPTIONAL)"
         case .payout: return "PAYOUT DETAILS"
         case .profile: return "PUBLISH PROFILE"
         }

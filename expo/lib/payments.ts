@@ -170,6 +170,10 @@ export interface CreatorBalance {
   payouts_enabled: boolean;
   lifetime_earnings: number;
   pending_payout: number;
+  /** LS-mode label, e.g. "PayPal · you@example.com" or "Bank · ••••1234 (US)". Null in Stripe mode. */
+  payout_method?: string | null;
+  /** LS-mode label string (PayPal/bank details) or "Stripe Connect" in legacy mode. */
+  payout_method_label?: string | null;
 }
 
 export async function fetchCreatorBalance(): Promise<CreatorBalance> {

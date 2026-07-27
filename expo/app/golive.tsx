@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import {
@@ -8,13 +9,14 @@ import {
   MessageSquareOff,
   Monitor,
   Radio,
+  ShieldCheck,
   Smartphone,
   Timer,
   UserPlus,
   Users,
 } from "lucide-react-native";
-import React, { useEffect, useRef, useState } from "react";
-import { Animated, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Animated, Modal, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
 import { Button, Chip, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
@@ -43,6 +45,28 @@ export default function GoLiveScreen() {
   const [viewers, setViewers] = useState<number>(0);
   const [earned, setEarned] = useState<number>(0);
   const pulse = useRef(new Animated.Value(0)).current;
+  const [showConsent, setShowConsent] = useState<boolean>(false);
+  const [pendingAction, setPendingAction] = useState<null | (() => void)>(null);
+
+  /** Show the one-time 18+/consent sheet, then run the start-stream action. */
+  const gateWithConsent = useCallback(async (action: () => void): Promise<void> => {
+    const ack = await AsyncStorage.getItem("golive_consent_v1");
+    if (ack === "true") {
+      action();
+      return;
+    }
+    setPendingAction(() => action);
+    setShowConsent(true);
+  }, []);
+
+  const confirmConsent = useCallback(async (): Promise<void> => {
+    await AsyncStorage.setItem("golive_consent_v1", "true");
+    haptic("success");
+    setShowConsent(false);
+    const action = pendingAction;
+    setPendingAction(null);
+    if (action) action();
+  }, [pendingAction]);
 
   useEffect(() => {
     if (!onAir) return;
@@ -247,30 +271,64 @@ export default function GoLiveScreen() {
         label={source === "phone" ? "Open camera & go live" : "Go live now"}
         variant="live"
         icon={<Radio size={17} color="#fff" />}
-        onPress={() => {
-          if (source === "phone") {
-            // Launch the real camera broadcast surface.
-            const qp = new URLSearchParams({
-              title: title.trim() || "Untitled POV stream",
-              category,
-              access,
-            });
-            if (access === "ppv" && ppvPrice) qp.set("ppvPrice", String(ppvPrice));
+        onPress={() =>
+          void gateWithConsent(() => {
+            if (source === "phone") {
+              // Launch the real camera broadcast surface.
+              const qp = new URLSearchParams({
+                title: title.trim() || "Untitled POV stream",
+                category,
+                access,
+              });
+              if (access === "ppv" && ppvPrice) qp.set("ppvPrice", String(ppvPrice));
+              haptic("heavy");
+              router.push(`/host?${qp.toString()}`);
+              return;
+            }
+            setOnAir(true);
+            setSeconds(0);
+            setViewers(Math.floor(Math.random() * 120) + 40);
             haptic("heavy");
-            router.push(`/host?${qp.toString()}`);
-            return;
-          }
-          setOnAir(true);
-          setSeconds(0);
-          setViewers(Math.floor(Math.random() * 120) + 40);
-          haptic("heavy");
-        }}
+          })
+        }
         style={{ marginTop: 24 }}
       />
       <Text style={styles.legal}>
         Streams are monitored for guideline violations. Everyone appearing on camera must be 18+
         and have consented to being filmed and broadcast.
       </Text>
+
+      {/* One-time 18+/consent sheet */}
+      <Modal
+        visible={showConsent}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowConsent(false)}
+      >
+        <View style={styles.consentOverlay}>
+          <View style={styles.consentSheet}>
+            <View style={styles.consentIcon}>
+              <ShieldCheck size={26} color={Colors.ink} />
+            </View>
+            <Text style={styles.consentTitle}>Before you go live</Text>
+            <Text style={styles.consentBody}>
+              Everyone appearing on camera must be 18+ and must have consented to being filmed and
+              broadcast. POVMe is an 18+ platform. You&apos;re responsible for confirming everyone
+              on your stream has agreed.
+            </Text>
+            <Button label="I understand — start stream" onPress={() => void confirmConsent()} />
+            <Button
+              label="Cancel"
+              variant="dark"
+              onPress={() => {
+                setShowConsent(false);
+                setPendingAction(null);
+              }}
+              style={{ marginTop: 8 }}
+            />
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -427,6 +485,30 @@ const styles = StyleSheet.create({
   },
   previewText: { color: Colors.text, fontSize: 13, fontWeight: "600", lineHeight: 19 },
   legal: { color: Colors.textDim, fontSize: 11, fontWeight: "600", lineHeight: 17, marginTop: 16 },
+  consentOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.72)",
+    justifyContent: "flex-end",
+  },
+  consentSheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    paddingBottom: 38,
+    gap: 14,
+  },
+  consentIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: Colors.lime,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+  },
+  consentTitle: { color: Colors.text, fontSize: 22, fontWeight: "900", letterSpacing: -0.6 },
+  consentBody: { color: Colors.textMid, fontSize: 13.5, fontWeight: "500", lineHeight: 20 },
   onAirCard: {
     padding: 22,
     borderRadius: Radius.lg,

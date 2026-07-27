@@ -10,6 +10,10 @@ struct GoLiveView: View {
     @State private var access: StreamAccess = .public
     @State private var ppvPrice = "4.99"
     @State private var live = false
+    @State private var showConsent = false
+    @State private var pendingStart = false
+
+    private let consentKey = "golive_consent_v1"
 
     var body: some View {
         ScrollView {
@@ -27,6 +31,62 @@ struct GoLiveView: View {
         .background(Theme.bg.ignoresSafeArea())
         .navigationTitle("Go live")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showConsent) {
+            consentSheet
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    /// One-time 18+/consent sheet shown before the first go-live.
+    private var consentSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                ZStack {
+                    Circle().fill(Theme.lime).frame(width: 48, height: 48)
+                    Image(systemName: "checkmark.shield.fill")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(Theme.ink)
+                }
+                Spacer()
+            }
+            Text("Before you go live")
+                .font(.system(size: 22, weight: .heavy))
+                .tracking(-0.6)
+                .foregroundStyle(Theme.text)
+            Text("Everyone appearing on camera must be 18+ and must have consented to being filmed and broadcast. POVMe is an 18+ platform. You're responsible for confirming everyone on your stream has agreed.")
+                .font(.system(size: 13.5, weight: .medium))
+                .foregroundStyle(Theme.textMid)
+                .lineSpacing(6)
+            Spacer(minLength: 0)
+            AppButton(label: "I understand — start stream") {
+                UserDefaults.standard.set(true, forKey: consentKey)
+                Hap.success()
+                showConsent = false
+                pendingStart = false
+                startStream()
+            }
+            AppButton(label: "Cancel", variant: .dark) {
+                showConsent = false
+                pendingStart = false
+            }
+        }
+        .padding(24)
+        .background(Theme.surface.ignoresSafeArea())
+    }
+
+    /// Gate the go-live action behind the one-time consent sheet.
+    private func gateGoLive() {
+        if UserDefaults.standard.bool(forKey: consentKey) {
+            startStream()
+        } else {
+            pendingStart = true
+            showConsent = true
+        }
+    }
+
+    private func startStream() {
+        live = true
     }
 
     private var setupForm: some View {
@@ -121,7 +181,7 @@ struct GoLiveView: View {
 
             Spacer(minLength: 20)
             AppButton(label: title.isEmpty ? "Add a title first" : "Go live now", variant: .live, disabled: title.isEmpty) {
-                live = true
+                gateGoLive()
             }
         }
     }
