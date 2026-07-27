@@ -606,8 +606,10 @@ export type Database = {
           amount: number
           creator_id: string
           id: string
+          payout_address: string | null
           payout_handle: string | null
           payout_method: string | null
+          payout_network: string | null
           processed_at: string | null
           processed_by: string | null
           requested_at: string
@@ -618,8 +620,10 @@ export type Database = {
           amount: number
           creator_id: string
           id?: string
+          payout_address?: string | null
           payout_handle?: string | null
           payout_method?: string | null
+          payout_network?: string | null
           processed_at?: string | null
           processed_by?: string | null
           requested_at?: string
@@ -630,8 +634,10 @@ export type Database = {
           amount?: number
           creator_id?: string
           id?: string
+          payout_address?: string | null
           payout_handle?: string | null
           payout_method?: string | null
+          payout_network?: string | null
           processed_at?: string | null
           processed_by?: string | null
           requested_at?: string
@@ -742,10 +748,15 @@ export type Database = {
           location: string | null
           name: string | null
           onboarded: boolean | null
+          payout_account_last4: string | null
+          payout_account_name: string | null
+          payout_address: string | null
           payout_balance: number | null
           payout_connected: boolean | null
           payout_handle: string | null
+          payout_label: string | null
           payout_method: string | null
+          payout_network: string | null
           pending_payout: number | null
           stripe_account_id: string | null
           stripe_account_status: string | null
@@ -785,10 +796,15 @@ export type Database = {
           location?: string | null
           name?: string | null
           onboarded?: boolean | null
+          payout_account_last4?: string | null
+          payout_account_name?: string | null
+          payout_address?: string | null
           payout_balance?: number | null
           payout_connected?: boolean | null
           payout_handle?: string | null
+          payout_label?: string | null
           payout_method?: string | null
+          payout_network?: string | null
           pending_payout?: number | null
           stripe_account_id?: string | null
           stripe_account_status?: string | null
@@ -828,10 +844,15 @@ export type Database = {
           location?: string | null
           name?: string | null
           onboarded?: boolean | null
+          payout_account_last4?: string | null
+          payout_account_name?: string | null
+          payout_address?: string | null
           payout_balance?: number | null
           payout_connected?: boolean | null
           payout_handle?: string | null
+          payout_label?: string | null
           payout_method?: string | null
+          payout_network?: string | null
           pending_payout?: number | null
           stripe_account_id?: string | null
           stripe_account_status?: string | null
