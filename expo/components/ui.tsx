@@ -252,11 +252,24 @@ export function Avatar({
         justifyContent: "center",
       }}
     >
-      <Image
-        source={{ uri }}
-        style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: Colors.surfaceHi }}
-        contentFit="cover"
-      />
+      {uri ? (
+        <Image
+          source={{ uri }}
+          style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: Colors.surfaceHi }}
+          contentFit="cover"
+        />
+      ) : (
+        <View
+          style={{
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: Colors.surfaceHi,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        />
+      )}
     </View>
   );
 }

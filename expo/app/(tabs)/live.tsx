@@ -140,7 +140,9 @@ export default function LiveScreen() {
           return (
             <PressableScale key={c.id} scaleTo={0.96} onPress={() => router.push(`/creator/${c.creatorId}`)}>
               <View style={styles.clip}>
-                <Image source={{ uri: creator?.cover ?? "" }} style={StyleSheet.absoluteFill} contentFit="cover" />
+                {creator?.cover ? (
+                  <Image source={{ uri: creator.cover }} style={StyleSheet.absoluteFill} contentFit="cover" />
+                ) : <View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.ink }]} />}
                 <LinearGradient colors={["transparent", "rgba(8,8,10,0.95)"]} style={StyleSheet.absoluteFill} />
                 <View style={styles.clipBadge}>
                   <Scissors size={11} color={Colors.ink} />

@@ -229,12 +229,14 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
     const price = isPpv ? (stream?.ppvPrice ?? 0) : creator?.subPrice ?? 0;
     return (
       <View style={styles.screen}>
-        <Image
-          source={{ uri: props.thumb ?? stream?.thumb ?? "" }}
-          style={StyleSheet.absoluteFill}
-          contentFit="cover"
-          blurRadius={35}
-        />
+        {(props.thumb ?? stream?.thumb) ? (
+          <Image
+            source={{ uri: (props.thumb ?? stream?.thumb) as string }}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            blurRadius={35}
+          />
+        ) : <View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.ink }]} />}
         <LinearGradient
           colors={["rgba(255,45,111,0.2)", "rgba(8,8,10,0.85)", Colors.ink]}
           style={StyleSheet.absoluteFill}
@@ -309,12 +311,14 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
           contentFit="cover"
           nativeControls={false}
         />
-      ) : (
+      ) : (props.thumb ?? stream?.thumb) ? (
         <Image
-          source={{ uri: props.thumb ?? stream?.thumb ?? "" }}
+          source={{ uri: (props.thumb ?? stream?.thumb) as string }}
           style={StyleSheet.absoluteFill}
           contentFit="cover"
         />
+      ) : (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.ink }]} />
       )}
       <LinearGradient
         colors={["rgba(8,8,10,0.85)", "transparent", "rgba(8,8,10,0.5)", "rgba(8,8,10,0.95)"]}

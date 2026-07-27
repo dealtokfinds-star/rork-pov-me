@@ -183,11 +183,13 @@ export default function FeedScreen() {
           episodes.length > 0 ? (
             <PressableScale onPress={() => router.push("/explore")}>
               <View style={styles.promo}>
-                <Image
-                  source={{ uri: allCreators[3]?.cover ?? "" }}
-                  style={StyleSheet.absoluteFill}
-                  contentFit="cover"
-                />
+                {allCreators[3]?.cover ? (
+                  <Image
+                    source={{ uri: allCreators[3].cover }}
+                    style={StyleSheet.absoluteFill}
+                    contentFit="cover"
+                  />
+                ) : <View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.ink }]} />}
                 <LinearGradient
                   colors={["rgba(8,8,10,0.35)", "rgba(8,8,10,0.95)"]}
                   style={StyleSheet.absoluteFill}
