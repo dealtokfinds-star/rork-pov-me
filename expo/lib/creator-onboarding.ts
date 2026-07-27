@@ -3,6 +3,7 @@ import { Platform } from "react-native";
 
 import { supabase } from "@/lib/supabase";
 import { callEdge } from "@/lib/edge";
+import { getValidAccessToken } from "@/lib/token";
 
 /** Returns the current user's id from the stored Rork Auth JWT (sub claim). */
 async function currentUserId(): Promise<string | null> {
@@ -131,12 +132,15 @@ export async function submitKyc(input: {
 }
 
 /**
- * Save payout details (PayPal or bank) via the `creator-payout-details`
- * edge function. Only the last 4 digits of the bank account number are
- * stored — the client extracts them before sending.
+ * Save payout details (PayPal or bank) directly on the user's profile row.
  *
- * The edge function expects snake_case keys (matching the DB columns),
- * so we map the ergonomic camelCase input here before sending.
+ * The `profiles` RLS policy `(user_id() = id)` lets a signed-in user
+ * update their own row, so no edge function is needed. Only the last 4
+ * digits of the bank account number are stored — extracted client-side so
+ * the full account number never leaves the device.
+ *
+ * Returns `{ ok, method }` to keep the same shape as the old edge-function
+ * implementation.
  */
 export async function savePayoutDetails(input: {
   method: "paypal" | "bank";
@@ -146,16 +150,52 @@ export async function savePayoutDetails(input: {
   bankRouting?: string;
   bankCountry?: string;
 }): Promise<{ ok: boolean; method: string }> {
-  const payload: Record<string, unknown> = { method: input.method };
+  const uid = await currentUserId();
+  if (!uid) throw new Error("Not signed in");
+
+  const now = new Date().toISOString();
+  const update: Record<string, unknown> = {
+    payout_method: input.method,
+    updated_at: now,
+  };
+
   if (input.method === "paypal") {
-    payload.paypal_email = input.paypalEmail;
+    const email = input.paypalEmail?.trim().toLowerCase();
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      throw new Error("A valid PayPal email is required");
+    }
+    update.payout_paypal_email = email;
+    // Clear any bank fields
+    update.payout_bank_account_holder = null;
+    update.payout_bank_account_last4 = null;
+    update.payout_bank_routing = null;
+    update.payout_bank_country = null;
   } else {
-    payload.bank_account_holder = input.bankAccountHolder;
-    payload.bank_account_number = input.bankAccountNumber;
-    payload.bank_routing = input.bankRouting;
-    payload.bank_country = input.bankCountry;
+    const holder = input.bankAccountHolder?.trim();
+    const number = input.bankAccountNumber?.replace(/\s/g, "");
+    const routing = input.bankRouting?.replace(/\s/g, "");
+    const country = input.bankCountry?.trim().toUpperCase();
+
+    if (!holder) throw new Error("Account holder name is required");
+    if (!number || number.length < 4) throw new Error("A valid account number is required");
+    if (!routing) throw new Error("Routing number is required");
+    if (!country || country.length !== 2) throw new Error("Country (2-letter ISO) is required");
+
+    // Store only last 4 digits of the account number
+    update.payout_bank_account_holder = holder;
+    update.payout_bank_account_last4 = number.slice(-4);
+    update.payout_bank_routing = routing;
+    update.payout_bank_country = country;
+    // Clear PayPal field
+    update.payout_paypal_email = null;
   }
-  return callEdge<{ ok: boolean; method: string }>("creator-payout-details", payload);
+
+  const { error } = await supabase.from("profiles").update(update).eq("id", uid);
+  if (error) {
+    console.error("[povme] savePayoutDetails:", error.message);
+    throw new Error(error.message || "Failed to save payout details");
+  }
+  return { ok: true, method: input.method };
 }
 
 /**
