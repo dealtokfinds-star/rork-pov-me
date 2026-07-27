@@ -90,40 +90,31 @@ final class CreatorOnboardingClient {
         return rows.first
     }
 
-    /// Upload a KYC document image to the user's private folder.
-    func uploadKycDocument(kind: String, image: UIImage) async throws -> String {
-        guard let uid = edge.userId else { throw OnboardingError.noUserId }
+    /// Encode a UIImage as base64 (no data: prefix).
+    private func encodeImage(_ image: UIImage) throws -> String {
         guard let jpegData = image.jpegData(compressionQuality: 0.7) else {
             throw OnboardingError.uploadFailed("Could not encode image")
         }
-        let path = "\(uid)/\(kind).jpg"
-        guard let url = URL(string: "\(supabaseURL)/storage/v1/object/kyc-documents/\(path)") else {
-            throw OnboardingError.invalidResponse
-        }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
-        req.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
-        req.setValue("upsert=true", forHTTPHeaderField: "x-upsert")
-        if let token = edgeAuthToken { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        req.httpBody = jpegData
-
-        let (_, response) = try await session.data(for: req)
-        guard let http = response as? HTTPURLResponse, http.statusCode < 300 else {
-            throw OnboardingError.uploadFailed("Storage returned \( (response as? HTTPURLResponse)?.statusCode ?? 0)")
-        }
-        return path
+        return jpegData.base64EncodedString()
     }
 
-    /// Submit KYC documents for admin review.
+    /// Submit KYC documents for review. Sends base64-encoded images to the
+    /// `submit-kyc` edge function, which uploads them server-side (service
+    /// role bypasses RLS and CORS). Auto-approves on the backend →
+    /// `kyc_status='verified'` immediately.
     func submitKyc(front: UIImage, back: UIImage, selfie: UIImage) async throws -> SubmitKycResponse {
-        async let f = uploadKycDocument(kind: "front", image: front)
-        async let b = uploadKycDocument(kind: "back", image: back)
-        async let s = uploadKycDocument(kind: "selfie", image: selfie)
-        let (frontPath, backPath, selfiePath) = try await (f, b, s)
+        let frontData = try encodeImage(front)
+        let backData = try encodeImage(back)
+        let selfieData = try encodeImage(selfie)
         return try await edge.call(
             "submit-kyc",
-            body: ["documents": ["front": frontPath, "back": backPath, "selfie": selfiePath]],
+            body: [
+                "documents": [
+                    "front": ["data": frontData, "contentType": "image/jpeg"],
+                    "back": ["data": backData, "contentType": "image/jpeg"],
+                    "selfie": ["data": selfieData, "contentType": "image/jpeg"],
+                ],
+            ],
             as: SubmitKycResponse.self
         )
     }

@@ -3,18 +3,24 @@ import { sendEmailInternal } from "../send-email/index.ts";
 
 /**
  * POST /submit-kyc
- * Body: { documents: { front: string, back: string, selfie: string } }
+ * Body: {
+ *   documents: {
+ *     front: { data: string, contentType: string },  // data = base64 (no data: prefix)
+ *     back:  { data: string, contentType: string },
+ *     selfie:{ data: string, contentType: string },
+ *   }
+ * }
  *
- * Creator submits their KYC documents (already uploaded to the
- * kyc-documents storage bucket via the client). Auto-approves immediately —
- * `kyc_status` is set to `verified` on submit so the creator can go live
- * without waiting for admin review. The admin review queue still receives
- * the submission (for spot-checks / audits), but it no longer gates
- * activation.
+ * Creator submits their KYC documents. The client sends base64-encoded image
+ * bytes; this function uploads them to the `kyc-documents` storage bucket
+ * using the service-role admin client (bypassing client-side RLS and CORS
+ * entirely — the bucket is private and only the service role + the owning
+ * user's RLS policy can write). Auto-approves immediately: `kyc_status` is
+ * set to `verified` on submit so the creator can go live without waiting for
+ * admin review. The admin review queue still receives the submission
+ * notification (for spot-checks / audits), but it no longer gates activation.
  *
- * Documents are stored under `kyc-documents/{userId}/{front|back|selfie}.jpg`
- * — the client uploads them directly to Supabase Storage with RLS scoping
- * uploads to the user's own folder, then calls this endpoint with the paths.
+ * Documents are stored under `kyc-documents/{userId}/{front|back|selfie}.{ext}`.
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -23,32 +29,56 @@ Deno.serve(async (req) => {
   try {
     const user = await requireAuth(req);
     const body = await req.json().catch(() => ({})) as {
-      documents?: { front?: string; back?: string; selfie?: string };
+      documents?: {
+        front?: { data?: string; contentType?: string };
+        back?: { data?: string; contentType?: string };
+        selfie?: { data?: string; contentType?: string };
+      };
     };
 
-    if (!body.documents?.front || !body.documents?.back || !body.documents?.selfie) {
-      return json({ error: "Front, back, and selfie images are all required" }, 400);
-    }
-
-    const { front, back, selfie } = body.documents;
-
-    // Validate the paths belong to the user's folder (prevent path injection)
-    const userPrefix = `${user.userId}/`;
-    for (const path of [front, back, selfie]) {
-      if (!path.startsWith(userPrefix)) {
-        return json({ error: "Invalid document path" }, 400);
-      }
+    const docs = body.documents;
+    if (!docs?.front?.data || !docs.back?.data || !docs.selfie?.data) {
+      return json(
+        { error: "Front, back, and selfie images (as base64) are all required" },
+        400,
+      );
     }
 
     const admin = createAdminClient();
     const now = new Date().toISOString();
 
-    // Auto-approve: set kyc_status to 'verified' immediately so the creator
-    // can go live without waiting for admin review. Admins still receive a
-    // notification for spot-checks, but review no longer gates activation.
+    // Upload each document to storage using the service-role client.
+    // Service role bypasses RLS, so no storage policy is needed for the
+    // server-side write. The bucket is private.
+    const paths: Record<string, string> = {};
+    const kinds: Array<"front" | "back" | "selfie"> = ["front", "back", "selfie"];
+    for (const kind of kinds) {
+      const doc = docs[kind]!;
+      const contentType = doc.contentType ?? "image/jpeg";
+      const ext = contentType === "image/png" ? "png" : "jpg";
+      const path = `${user.userId}/${kind}.${ext}`;
+      // Decode base64 to binary.
+      const binary = atob(doc.data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+      const { error: upErr } = await admin.storage
+        .from("kyc-documents")
+        .upload(path, bytes, {
+          contentType,
+          upsert: true,
+        });
+      if (upErr) {
+        console.error(`[submit-kyc] upload ${kind} error:`, upErr.message);
+        return json({ error: `Failed to upload ${kind} document` }, 500);
+      }
+      paths[kind] = path;
+    }
+
+    // Auto-approve: set kyc_status to 'verified' immediately.
     const { error } = await admin.from("profiles").update({
       kyc_status: "verified",
-      kyc_documents: { front, back, selfie },
+      kyc_documents: paths,
       kyc_submitted_at: now,
       kyc_verified_at: now,
       kyc_reviewed_by: null, // null = system auto-approval

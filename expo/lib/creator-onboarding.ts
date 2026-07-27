@@ -1,5 +1,5 @@
 import * as SecureStore from "expo-secure-store";
-import * as ImagePicker from "expo-image";
+import { Platform } from "react-native";
 
 import { supabase } from "@/lib/supabase";
 import { callEdge } from "@/lib/edge";
@@ -74,65 +74,59 @@ export async function fetchKycState(): Promise<KycState | null> {
 }
 
 /**
- * Upload a KYC document image to the user's private folder in the
- * `kyc-documents` storage bucket. Returns the storage path.
+ * Read a local image URI as base64 (no data: prefix). On native this uses
+ * expo-file-system; on web it fetches the blob and reads it as a data URL.
  */
-export async function uploadKycDocument(
-  kind: "front" | "back" | "selfie",
-  imageUri: string,
-): Promise<string> {
-  const token = await SecureStore.getItemAsync("access_token");
-  if (!token) throw new Error("Not signed in");
-
-  // Read the user id from the JWT sub claim
-  const parts = token.split(".");
-  if (parts.length !== 3) throw new Error("Invalid token");
-  const payload = JSON.parse(
-    atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")),
-  ) as { sub?: string };
-  const userId = payload.sub;
-  if (!userId) throw new Error("No user id in token");
-
-  const path = `${userId}/${kind}.jpg`;
-  const fileExt = imageUri.split(".").pop()?.toLowerCase() ?? "jpg";
-  const contentType = fileExt === "png" ? "image/png" : "image/jpeg";
-
-  // Fetch the image bytes
-  const imgRes = await fetch(imageUri);
-  const blob = await imgRes.blob();
-
-  const { error } = await supabase.storage
-    .from("kyc-documents")
-    .upload(path, blob, {
-      contentType,
-      upsert: true,
+async function readImageAsBase64(uri: string): Promise<string> {
+  if (Platform.OS === "web") {
+    const res = await fetch(uri);
+    const blob = await res.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        // Strip the `data:<mime>;base64,` prefix.
+        const commaIdx = result.indexOf(",");
+        resolve(commaIdx >= 0 ? result.slice(commaIdx + 1) : result);
+      };
+      reader.onerror = () => reject(new Error("Failed to read image"));
+      reader.readAsDataURL(blob);
     });
-
-  if (error) {
-    console.error("[povme] uploadKycDocument:", error.message);
-    throw error;
   }
-  return path;
+  const { readAsStringAsync } = await import("expo-file-system");
+  return await readAsStringAsync(uri, { encoding: "base64" as never });
+}
+
+/** Infer a MIME type from a URI's extension (defaults to jpeg). */
+function contentTypeForUri(uri: string): string {
+  const ext = uri.split(".").pop()?.toLowerCase() ?? "jpg";
+  return ext === "png" ? "image/png" : "image/jpeg";
 }
 
 /**
- * Submit KYC documents for admin review. Uploads the three images (if URIs
- * are provided) then calls the `submit-kyc` edge function with the storage
- * paths. Sets kyc_status='pending'.
+ * Submit KYC documents for review. Reads the three images as base64 and
+ * sends them to the `submit-kyc` edge function, which uploads them to the
+ * private `kyc-documents` storage bucket server-side (service role bypasses
+ * RLS, avoiding client-side storage policy and CORS issues). Auto-approves
+ * on the backend → `kyc_status='verified'` immediately.
  */
 export async function submitKyc(input: {
   frontUri: string;
   backUri: string;
   selfieUri: string;
 }): Promise<{ ok: boolean; kyc_status: string }> {
-  const [front, back, selfie] = await Promise.all([
-    uploadKycDocument("front", input.frontUri),
-    uploadKycDocument("back", input.backUri),
-    uploadKycDocument("selfie", input.selfieUri),
+  const [frontData, backData, selfieData] = await Promise.all([
+    readImageAsBase64(input.frontUri),
+    readImageAsBase64(input.backUri),
+    readImageAsBase64(input.selfieUri),
   ]);
 
   return callEdge<{ ok: boolean; kyc_status: string }>("submit-kyc", {
-    documents: { front, back, selfie },
+    documents: {
+      front: { data: frontData, contentType: contentTypeForUri(input.frontUri) },
+      back: { data: backData, contentType: contentTypeForUri(input.backUri) },
+      selfie: { data: selfieData, contentType: contentTypeForUri(input.selfieUri) },
+    },
   });
 }
 
