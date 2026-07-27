@@ -17,7 +17,11 @@ import { Platform } from "react-native";
  *   - sub:    Monthly subscription to a creator
  */
 
-const FUNCTIONS_URL = process.env.EXPO_PUBLIC_RORK_FUNCTIONS_URL!;
+// Edge functions are deployed to the project's Supabase instance under
+// /functions/v1/<slug>. Derive the base from EXPO_PUBLIC_SUPABASE_URL (always
+// set) — EXPO_PUBLIC_RORK_FUNCTIONS_URL is not guaranteed to point here.
+const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? "").replace(/\/$/, "");
+const FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 const PROJECT_ID = process.env.EXPO_PUBLIC_PROJECT_ID!;
 
 export type PaymentType = "topup" | "tip" | "ppv" | "sub";

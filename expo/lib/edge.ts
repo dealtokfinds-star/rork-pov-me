@@ -1,6 +1,11 @@
 import * as SecureStore from "expo-secure-store";
 
-const FUNCTIONS_URL = process.env.EXPO_PUBLIC_RORK_FUNCTIONS_URL!;
+/** Base URL for Supabase Edge Functions. Edge functions are deployed to the
+ *  project's Supabase instance under /functions/v1/<slug>. We derive this from
+ *  EXPO_PUBLIC_SUPABASE_URL (always set) rather than EXPO_PUBLIC_RORK_FUNCTIONS_URL,
+ *  which is not guaranteed to point at the Supabase functions endpoint. */
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+const FUNCTIONS_URL = `${SUPABASE_URL.replace(/\/$/, "")}/functions/v1`;
 
 /** Fetch wrapper for Supabase Edge Functions with Rork Auth JWT. */
 export async function callEdge<T = unknown>(
@@ -31,3 +36,6 @@ export async function callEdge<T = unknown>(
 }
 
 export { FUNCTIONS_URL };
+
+// Re-export the legacy name for any callers that still import it.
+export const LEGACY_FUNCTIONS_URL = process.env.EXPO_PUBLIC_RORK_FUNCTIONS_URL ?? FUNCTIONS_URL;
