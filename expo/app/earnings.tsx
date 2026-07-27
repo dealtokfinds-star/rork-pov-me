@@ -80,12 +80,12 @@ export default function EarningsScreen() {
           <View style={styles.pending}>
             <Clock size={14} color={Colors.gold} />
             <Text style={styles.pendingText}>
-              Payout requested — Stripe is sending it to your bank account within 1–2 business days
+              Payout requested — sent to your {payoutMethod ?? "payout"} handle within 1–2 business days
             </Text>
           </View>
         ) : payoutsEnabled ? (
           <Button
-            label={withdrawing ? "Processing…" : `Withdraw to bank`}
+            label={withdrawing ? "Processing…" : `Withdraw to ${payoutMethod ?? "payout"}`}
             icon={<Banknote size={16} color={Colors.ink} />}
             onPress={() => void handleWithdraw()}
             disabled={withdrawing || available < 1}
@@ -94,7 +94,8 @@ export default function EarningsScreen() {
         ) : (
           <View style={styles.disabledBox}>
             <Text style={styles.disabledText}>
-              Connect a Stripe account in Become a Creator to withdraw earnings to your bank.
+              Add a payout method (PayPal, Venmo, Cash App, or Zelle) in Become a Creator to
+              withdraw earnings.
             </Text>
           </View>
         )}
@@ -130,12 +131,12 @@ export default function EarningsScreen() {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.accountLabel}>
-            {payoutMethod ? "Stripe · bank account" : "No payout method set"}
+            {payoutMethod ? `${payoutMethod} · ${payoutHandle ?? ""}` : "No payout method set"}
           </Text>
           <Text style={styles.accountSub}>
             {payoutMethod
-              ? "Stripe Connect · deposits in 1–2 business days"
-              : "Connect Stripe in Become a Creator to withdraw"}
+              ? "Manual payouts · processed within 1–2 business days"
+              : "Add PayPal, Venmo, Cash App, or Zelle in Become a Creator"}
           </Text>
         </View>
         {payoutMethod ? <Check size={17} color={Colors.success} /> : null}
@@ -167,7 +168,7 @@ export default function EarningsScreen() {
 
       <PressableScale>
         <Text style={styles.legal}>
-          povme keeps 20% of gross revenue. Payouts are deposited to your bank via Stripe.
+          povme keeps 20% of gross revenue. Payouts are sent manually to your saved handle.
           Taxes are your responsibility — export your annual statement from Settings.
         </Text>
       </PressableScale>

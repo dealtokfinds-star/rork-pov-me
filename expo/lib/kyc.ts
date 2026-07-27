@@ -22,28 +22,30 @@ async function currentUserId(): Promise<string | null> {
  *
  * Replaces Stripe Identity. The creator confirms legal name + DOB, uploads a
  * photo of their government ID to the private `verification` bucket, and an
- * admin reviews it in the trust & safety queue. Payouts use Stripe Connect —
- * see connectStripePayouts.
+ * admin reviews it in the trust & safety queue. Payouts use a separate manual
+ * flow (PayPal/Venmo/CashApp/Zelle handle) — see updatePayoutHandle.
  */
 
-export type KycStatus = "unverified" | "pending" | "verified" | "failed" | "suspended";
+export type KycStatus = "unverified" | "pending" | "verified" | "failed";
+export type PayoutMethod = "paypal" | "venmo" | "cashapp" | "zelle";
 
 export interface KycState {
   kycStatus: KycStatus;
   kycLastReason: string | null;
   legalName: string | null;
   dateOfBirth: string | null;
-  /** "stripe" when Connect onboarding is complete, otherwise null. */
-  payoutMethod: "stripe" | null;
-  /** Stripe account id (acct_...) when a Connect account exists. */
+  payoutMethod: PayoutMethod | null;
   payoutHandle: string | null;
   payoutsEnabled: boolean;
   hasUploadedId: boolean;
-  /** Stripe account status: missing | restricted | enabled */
-  accountStatus: "missing" | "restricted" | "enabled" | string | null;
-  /** Hosted onboarding URL, if onboarding is incomplete. */
-  onboardingUrl: string | null;
 }
+
+export const PAYOUT_METHODS: Array<{ id: PayoutMethod; label: string; hint: string }> = [
+  { id: "paypal", label: "PayPal", hint: "Email or PayPal.me link" },
+  { id: "venmo", label: "Venmo", hint: "@username or phone" },
+  { id: "cashapp", label: "Cash App", hint: "$cashtag" },
+  { id: "zelle", label: "Zelle", hint: "Email or phone" },
+];
 
 async function authHeader(): Promise<Record<string, string>> {
   const token = await SecureStore.getItemAsync("access_token");
@@ -59,7 +61,7 @@ export async function fetchKycState(): Promise<KycState | null> {
   const { data, error } = await supabase
     .from("profiles")
     .select(
-      "kyc_status, kyc_last_reason, legal_name, date_of_birth, payout_method, payout_handle, stripe_payouts_enabled, stripe_account_id, stripe_account_status",
+      "kyc_status, kyc_last_reason, legal_name, date_of_birth, payout_method, payout_handle, stripe_payouts_enabled",
     )
     .eq("id", uid)
     .maybeSingle();
@@ -82,12 +84,10 @@ export async function fetchKycState(): Promise<KycState | null> {
     kycLastReason: data.kyc_last_reason ?? null,
     legalName: data.legal_name ?? null,
     dateOfBirth: data.date_of_birth ?? null,
-    payoutMethod: (data.payout_method === "stripe" ? "stripe" : null),
-    payoutHandle: data.stripe_account_id ?? null,
+    payoutMethod: (data.payout_method ?? null) as PayoutMethod | null,
+    payoutHandle: data.payout_handle ?? null,
     payoutsEnabled: data.stripe_payouts_enabled ?? false,
     hasUploadedId: (docs?.length ?? 0) > 0,
-    accountStatus: data.stripe_account_status ?? null,
-    onboardingUrl: null,
   };
 }
 
@@ -206,47 +206,28 @@ export async function createSignedUrl(path: string): Promise<string | null> {
 }
 
 /**
- * Start (or resume) Stripe Connect onboarding for the signed-in creator.
- * Returns a hosted onboarding URL to open in expo-web-browser. When the
- * creator finishes onboarding, the `account.updated` webhook flips
- * stripe_payouts_enabled on their profile.
- *
- * If onboarding is already complete, returns { ok, url: null } and the caller
- * can proceed without opening a browser.
+ * Save the creator's payout handle (PayPal/Venmo/CashApp/Zelle).
+ * Replaces Stripe Connect hosted onboarding.
  */
-export async function connectStripePayouts(input?: {
-  country?: string;
-  refreshUrl?: string;
-  returnUrl?: string;
-}): Promise<{
-  ok: boolean;
-  url: string | null;
-  account_id: string;
-  payouts_enabled: boolean;
-  details_submitted: boolean;
-}> {
+export async function updatePayoutHandle(input: {
+  method: PayoutMethod;
+  handle: string;
+}): Promise<{ ok: boolean }> {
   const headers = await authHeader();
   const res = await fetch(`${FUNCTIONS_URL}/functions/v1/update-payout-handle`, {
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
     body: JSON.stringify({
-      country: input?.country ?? "US",
-      refresh_url: input?.refreshUrl,
-      return_url: input?.returnUrl,
+      payout_method: input.method,
+      payout_handle: input.handle,
     }),
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    const message = (data as { error?: string })?.error ?? `Connect failed (${res.status})`;
+    const message = (data as { error?: string })?.error ?? `Save failed (${res.status})`;
     throw new Error(message);
   }
-  return data as {
-    ok: boolean;
-    url: string | null;
-    account_id: string;
-    payouts_enabled: boolean;
-    details_submitted: boolean;
-  };
+  return data as { ok: boolean };
 }
 
 /** Poll the profile row until KYC resolves or timeout. */

@@ -176,8 +176,6 @@ export interface CreatorBalance {
   payout_handle: string | null;
   lifetime_earnings: number;
   pending_payout: number;
-  account_status?: string | null;
-  onboarding_url?: string | null;
 }
 
 export async function fetchCreatorBalance(): Promise<CreatorBalance> {
@@ -197,8 +195,8 @@ export async function fetchCreatorBalance(): Promise<CreatorBalance> {
 }
 
 /**
- * Request a payout via Stripe Connect. Issues a real Stripe Payout on the
- * creator's Express account, depositing to their linked bank account.
+ * Request a manual payout to the creator's saved handle
+ * (PayPal/Venmo/CashApp/Zelle). The platform processes it and marks it paid.
  */
 export async function requestPayout(
   amount?: number,

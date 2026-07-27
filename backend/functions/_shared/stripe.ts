@@ -499,25 +499,6 @@ export function createPayout(params: {
   });
 }
 
-/** List recent payouts on a connected account (default 10, newest first). */
-export function listPayouts(account: string, limit = 10): Promise<{ data: Payout[]; has_more: boolean }> {
-  return stripeRequest<{ data: Payout[]; has_more: boolean }>("/payouts", {
-    params: { limit, "arrival_date[gt]": 0 },
-    stripeAccount: account,
-  });
-}
-
-/** List external accounts (banks/cards) on a connected account. */
-export function listExternalAccounts(
-  account: string,
-  type: "bank_account" | "card" = "bank_account",
-): Promise<{ data: Array<{ id: string; object: string; last4?: string; bank_name?: string; brand?: string; currency?: string }> }> {
-  return stripeRequest<{ data: Array<{ id: string; object: string; last4?: string; bank_name?: string; brand?: string; currency?: string }> }>(
-    `/accounts/${account}/external_accounts`,
-    { params: { object: type } },
-  );
-}
-
 // ---- Invoice helpers ----
 
 export function retrieveInvoice(id: string): Promise<Invoice> {

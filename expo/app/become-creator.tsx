@@ -4,9 +4,11 @@ import * as ImagePicker from "expo-image-picker";
 import {
   AlertCircle,
   BadgeCheck,
+  Banknote,
   Camera,
   Check,
   ChevronRight,
+  CreditCard as CardIcon,
   IdCard,
   Image as ImageIcon,
   Landmark,
@@ -35,17 +37,17 @@ import Colors, { Radius, microLabel } from "@/constants/colors";
 import { CATEGORIES, formatMoney } from "@/constants/mock-data";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  connectStripePayouts,
+  PAYOUT_METHODS,
   fetchKycState,
   pickIdPhoto,
   publishCreatorProfile,
   submitVerification,
+  updatePayoutHandle,
   uploadIdPhoto,
   type KycState,
+  type PayoutMethod,
 } from "@/lib/kyc";
 import type { PovCategory } from "@/types";
-import { FUNCTIONS_URL } from "@/lib/edge";
-import * as WebBrowser from "expo-web-browser";
 
 const PRICE_OPTIONS = [4.99, 7.99, 9.99, 12.99, 14.99, 19.99, 24.99, 29.99, 39.99, 49.99];
 
@@ -82,9 +84,9 @@ export default function BecomeCreatorScreen() {
   const [storagePath, setStoragePath] = useState<string | null>(null);
   const [photoSource, setPhotoSource] = useState<"camera" | "library">("camera");
 
-  // Stripe Connect onboarding
-  const [stripeConnected, setStripeConnected] = useState<boolean>(false);
-  const [connecting, setConnecting] = useState<boolean>(false);
+  // Payout form
+  const [payoutMethod, setPayoutMethod] = useState<PayoutMethod>("paypal");
+  const [payoutHandle, setPayoutHandle] = useState<string>("");
   const [agreed, setAgreed] = useState<boolean>(false);
 
   // Pull existing KYC state on mount so returning creators don't re-verify.
@@ -100,7 +102,8 @@ export default function BecomeCreatorScreen() {
         setDobMonth(m);
         setDobDay(d);
       }
-      if (state.payoutsEnabled) setStripeConnected(true);
+      if (state.payoutMethod) setPayoutMethod(state.payoutMethod);
+      if (state.payoutHandle) setPayoutHandle(state.payoutHandle);
 
       if (state.kycStatus === "verified" && state.payoutsEnabled) {
         setStage("profile");
@@ -181,39 +184,28 @@ export default function BecomeCreatorScreen() {
     }
   }, [legalName, dobValid, dobString, idPhotoBase64, loadKyc]);
 
-  const handleConnectStripe = useCallback(async (): Promise<void> => {
+  const handleSavePayout = useCallback(async (): Promise<void> => {
+    if (!payoutHandle.trim()) {
+      setError("Enter your payout handle");
+      return;
+    }
     if (!agreed) {
       setError("Agree to the creator terms first");
       return;
     }
     setLoading(true);
     setError(null);
-    setConnecting(true);
     try {
-      const result = await connectStripePayouts({ country: "US" });
-      // If onboarding is already complete, no URL is returned.
-      if (result.url) {
-        if (Platform.OS === "web") {
-          window.open(result.url, "_blank", "width=480,height=720");
-        } else {
-          const returnUrl = `${FUNCTIONS_URL}/update-payout-handle?done=1`;
-          await WebBrowser.openAuthSessionAsync(result.url, returnUrl);
-        }
-      }
+      await updatePayoutHandle({ method: payoutMethod, handle: payoutHandle.trim() });
       haptic("success");
-      // Re-pull state — the webhook may have already flipped payouts_enabled,
-      // or the creator may still need to finish. Give the webhook a moment.
-      await new Promise((r) => setTimeout(r, 1200));
       await loadKyc();
-      setStripeConnected(true);
       setStage("profile");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start Stripe onboarding");
+      setError(err instanceof Error ? err.message : "Could not save payout method");
     } finally {
       setLoading(false);
-      setConnecting(false);
     }
-  }, [agreed, loadKyc]);
+  }, [payoutMethod, payoutHandle, agreed, loadKyc]);
 
   const handlePublish = useCallback(async (): Promise<void> => {
     if (identity.trim().length === 0) {
@@ -252,15 +244,15 @@ export default function BecomeCreatorScreen() {
         </View>
         <Text style={styles.doneTitle}>You&apos;re a povme creator.</Text>
         <Text style={styles.doneBody}>
-          Identity verified, Stripe connected, and your studio is live. Upload your first POV
-          episode, set your access levels, and go live whenever you&apos;re ready. Payouts deposit
-          to your bank via Stripe on a rolling schedule.
+          Identity verified, payouts connected, and your studio is live. Upload your first POV
+          episode, set your access levels, and go live whenever you&apos;re ready. Payouts run
+          weekly to your {payoutMethod} handle.
         </Text>
         <View style={styles.summary}>
           <SummaryRow label="Identity" value={identity || "Verified creator"} />
           <SummaryRow label="Subscription" value={`${formatMoney(price)}/mo`} />
           <SummaryRow label="Your share" value={`${formatMoney(price * 0.8)} (80%)`} />
-          <SummaryRow label="Payouts" value="Stripe · automatic" />
+          <SummaryRow label="Payouts" value={`${payoutMethod} · weekly`} />
           <SummaryRow label="Status" value="Approved" />
         </View>
         <Button label="Open creator studio" onPress={() => router.replace("/(tabs)/studio")} style={{ marginTop: 24 }} />
@@ -287,7 +279,7 @@ export default function BecomeCreatorScreen() {
           <Text style={styles.title}>Verify &amp; connect payouts</Text>
           <Text style={styles.body}>
             Required by law for creator payouts. Confirm your identity, upload a photo of your
-            government ID, and connect Stripe. Our team reviews IDs within 24 hours.
+            government ID, and add a payout handle. Our team reviews IDs within 24 hours.
           </Text>
 
           {error ? (
@@ -323,8 +315,8 @@ export default function BecomeCreatorScreen() {
             />
             <KycRow
               icon={<Wallet size={17} color={Colors.lime} />}
-              label="Stripe payouts"
-              sub="Bank account via Stripe Connect"
+              label="Payout handle"
+              sub="PayPal, Venmo, Cash App, or Zelle"
               state={stage === "payout" ? "pending" : stage === "profile" ? "done" : "waiting"}
               loading={loading && stage === "payout"}
             />
@@ -488,42 +480,40 @@ export default function BecomeCreatorScreen() {
             </View>
           ) : null}
 
-          {/* Stage: Stripe Connect onboarding */}
+          {/* Stage: payout handle */}
           {stage === "payout" ? (
             <View style={{ gap: 14, marginTop: 18 }}>
-              {stripeConnected ? (
-                <View style={styles.verifiedBox}>
-                  <BadgeCheck size={22} color={Colors.success} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.verifiedTitle}>Stripe connected</Text>
-                    <Text style={styles.verifiedBody}>
-                      Your bank details are on file with Stripe. Earnings will be deposited
-                      automatically on a rolling schedule.
-                    </Text>
-                  </View>
-                </View>
-              ) : (
-                <View style={styles.stripeBox}>
-                  <View style={styles.stripeIconRow}>
-                    <View style={styles.stripeBadge}>
-                      <Landmark size={20} color={Colors.ink} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.stripeTitle}>Connect with Stripe</Text>
-                      <Text style={styles.stripeSub}>
-                        Stripe handles direct deposits to your bank account. You&apos;ll finish
-                        onboarding on Stripe&apos;s secure page — povme never sees your bank
-                        details.
+              <Text style={styles.fieldLabel}>PAYOUT METHOD</Text>
+              <View style={styles.methodGrid}>
+                {PAYOUT_METHODS.map((m) => (
+                  <PressableScale
+                    key={m.id}
+                    style={{ flex: 1 }}
+                    scaleTo={0.94}
+                    hapticStyle="medium"
+                    onPress={() => setPayoutMethod(m.id)}
+                  >
+                    <View style={[styles.methodCard, payoutMethod === m.id && styles.methodCardActive]}>
+                      {methodIcon(m.id)}
+                      <Text style={[styles.methodLabel, payoutMethod === m.id && { color: Colors.ink }]}>
+                        {m.label}
                       </Text>
                     </View>
-                  </View>
-                  <View style={styles.stripePerks}>
-                    <Text style={styles.perkLine}>• Automatic payouts to your bank</Text>
-                    <Text style={styles.perkLine}>• 1–2 business day deposits</Text>
-                    <Text style={styles.perkLine}>• Stripe-secure, PCI compliant</Text>
-                  </View>
-                </View>
-              )}
+                  </PressableScale>
+                ))}
+              </View>
+              <Text style={styles.fieldLabel}>
+                {PAYOUT_METHODS.find((m) => m.id === payoutMethod)?.hint.toUpperCase()}
+              </Text>
+              <TextInput
+                value={payoutHandle}
+                onChangeText={setPayoutHandle}
+                placeholder={PAYOUT_METHODS.find((m) => m.id === payoutMethod)?.hint ?? "Handle"}
+                placeholderTextColor={Colors.textDim}
+                style={styles.input}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
 
               <PressableScale onPress={() => setAgreed((v) => !v)} scaleTo={0.97}>
                 <View style={styles.termsRow}>
@@ -539,14 +529,14 @@ export default function BecomeCreatorScreen() {
               </PressableScale>
 
               <Button
-                label={connecting ? "Opening Stripe…" : stripeConnected ? "Re-check status" : "Connect Stripe"}
-                onPress={() => void handleConnectStripe()}
-                disabled={loading || (!stripeConnected && !agreed)}
-                icon={loading ? <Loader2 size={16} color={Colors.ink} /> : <ChevronRight size={18} color={Colors.ink} />}
+                label={loading ? "Saving…" : "Save payout method"}
+                onPress={() => void handleSavePayout()}
+                disabled={loading || !payoutHandle.trim() || !agreed}
+                icon={loading ? <Loader2 size={16} color={Colors.ink} /> : undefined}
               />
               {kyc?.kycStatus !== "verified" ? (
                 <Text style={styles.fieldHint}>
-                  You can connect Stripe now — payouts unlock once your ID is approved.
+                  You can save this now — payouts unlock once your ID is approved.
                 </Text>
               ) : null}
               <PressableScale onPress={() => void loadKyc()} scaleTo={0.97}>
@@ -566,7 +556,7 @@ export default function BecomeCreatorScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.verifiedTitle}>Verified &amp; ready</Text>
                   <Text style={styles.verifiedBody}>
-                    Identity approved · Stripe payouts connected. Finish your profile to
+                    Identity approved · {payoutMethod} payouts connected. Finish your profile to
                     go live.
                   </Text>
                 </View>
@@ -675,6 +665,13 @@ export default function BecomeCreatorScreen() {
       ) : null}
     </ScrollView>
   );
+}
+
+function methodIcon(id: PayoutMethod): React.ReactNode {
+  if (id === "paypal") return <CardIcon size={16} color={Colors.ink} />;
+  if (id === "venmo") return <Wallet size={16} color={Colors.ink} />;
+  if (id === "cashapp") return <Banknote size={16} color={Colors.ink} />;
+  return <Landmark size={16} color={Colors.ink} />;
 }
 
 function progressFor(stage: Stage): number {
@@ -928,7 +925,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   methodCardActive: { backgroundColor: Colors.lime, borderColor: Colors.lime },
-  methodLabel: { color: Colors.text, fontSize: 12.5, fontWeight: "900" },  termsRow: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
+  methodLabel: { color: Colors.text, fontSize: 12.5, fontWeight: "900" },
+  termsRow: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
   check: {
     width: 22,
     height: 22,
@@ -941,28 +939,6 @@ const styles = StyleSheet.create({
   },
   checkActive: { backgroundColor: Colors.lime, borderColor: Colors.lime },
   termsText: { flex: 1, color: Colors.textMid, fontSize: 11.5, fontWeight: "600", lineHeight: 17 },
-  // Stripe Connect onboarding
-  stripeBox: {
-    padding: 18,
-    borderRadius: Radius.md,
-    backgroundColor: "rgba(99,91,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(99,91,255,0.28)",
-    gap: 14,
-  },
-  stripeIconRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
-  stripeBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: "#635BFF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  stripeTitle: { color: Colors.text, fontSize: 16, fontWeight: "900", letterSpacing: -0.3 },
-  stripeSub: { color: Colors.textMid, fontSize: 12.5, fontWeight: "600", lineHeight: 18, marginTop: 5 },
-  stripePerks: { gap: 4, paddingLeft: 4 },
-  perkLine: { color: Colors.textMid, fontSize: 12, fontWeight: "600", lineHeight: 18 },
   // Verified
   verifiedBox: {
     flexDirection: "row",
