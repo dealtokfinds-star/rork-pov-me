@@ -115,12 +115,9 @@ export async function openHostedPage(
 
 /** Fetch the current user's KYC + Connect state from their profile row. */
 export async function fetchKycState(): Promise<KycState | null> {
-  const uid = await currentUserId();
-  if (!uid) return null;
   const { data, error } = await supabase
     .from("profiles")
     .select("kyc_status, kyc_session_url, kyc_last_reason, stripe_account_id, stripe_account_status, stripe_payouts_enabled")
-    .eq("id", uid)
     .maybeSingle();
 
   if (error) {
