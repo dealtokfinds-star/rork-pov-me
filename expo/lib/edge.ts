@@ -1,4 +1,4 @@
-import * as SecureStore from "expo-secure-store";
+import { getValidAccessToken } from "@/lib/token";
 
 const FUNCTIONS_URL = process.env.EXPO_PUBLIC_RORK_FUNCTIONS_URL!;
 
@@ -8,7 +8,7 @@ export async function callEdge<T = unknown>(
   body?: unknown,
   init?: { method?: "POST" | "GET"; headers?: Record<string, string> },
 ): Promise<T> {
-  const token = await SecureStore.getItemAsync("access_token");
+  const token = await getValidAccessToken();
   const method = init?.method ?? "POST";
   const headers: Record<string, string> = {
     "Content-Type": "application/json",

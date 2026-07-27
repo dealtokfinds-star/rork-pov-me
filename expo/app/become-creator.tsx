@@ -108,7 +108,7 @@ export default function BecomeCreatorScreen() {
   const pickImage = useCallback(async (kind: DocKind): Promise<void> => {
     haptic("light");
     const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [3, 4],
       quality: 0.7,

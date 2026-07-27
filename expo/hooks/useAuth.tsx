@@ -14,6 +14,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { decodeJwt, getValidAccessToken } from "@/lib/token";
+
 const AUTH_URL = process.env.EXPO_PUBLIC_RORK_AUTH_URL!;
 const APP_KEY = process.env.EXPO_PUBLIC_RORK_APP_KEY!;
 const PROJECT_ID = process.env.EXPO_PUBLIC_PROJECT_ID!;
@@ -58,19 +60,13 @@ export interface AuthUser {
   picture?: string;
 }
 
-/** Decode the JWT payload to extract user info and check expiration. */
+/** Decode the JWT payload to extract user info. Expiry is checked by the
+ * shared token manager (`getValidAccessToken`), so callers never receive a
+ * stale token. */
 function userFromToken(token: string): AuthUser | null {
   try {
-    const parts = token.split(".");
-    if (parts.length !== 3) return null;
-
-    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const payload = JSON.parse(atob(base64));
-
-    if (payload.exp && payload.exp * 1000 < Date.now()) {
-      return null;
-    }
-
+    const payload = decodeJwt(token);
+    if (!payload?.sub) return null;
     return {
       id: payload.sub,
       email: payload.email ?? "",
@@ -105,54 +101,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError(null);
   }, []);
 
-  const refreshToken = useCallback(async (): Promise<void> => {
-    const storedRefreshToken = await SecureStore.getItemAsync("refresh_token");
-    if (!storedRefreshToken) {
-      setUser(null);
-      return;
-    }
-
-    const response = await fetch(`${AUTH_URL}/oauth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ app_key: APP_KEY, refresh_token: storedRefreshToken }),
-    });
-
-    if (!response.ok) {
-      await SecureStore.deleteItemAsync("access_token");
-      await SecureStore.deleteItemAsync("refresh_token");
-      setUser(null);
-      return;
-    }
-
-    const { access_token } = await response.json();
-    await SecureStore.setItemAsync("access_token", access_token);
-    setUser(userFromToken(access_token));
-  }, []);
-
   const checkAuth = useCallback(async (): Promise<void> => {
     try {
-      const accessToken = await SecureStore.getItemAsync("access_token");
-      if (!accessToken) {
-        const refreshTokenStored = await SecureStore.getItemAsync("refresh_token");
-        if (refreshTokenStored) {
-          await refreshToken();
-        }
-        return;
-      }
-
-      const decoded = userFromToken(accessToken);
-      if (decoded) {
-        setUser(decoded);
+      const accessToken = await getValidAccessToken();
+      if (accessToken) {
+        setUser(userFromToken(accessToken));
       } else {
-        await refreshToken();
+        setUser(null);
       }
     } catch (err) {
       console.error("[povme] Auth check failed:", err);
     } finally {
       setIsLoading(false);
     }
-  }, [refreshToken]);
+  }, []);
 
   useEffect(() => {
     checkAuth();
