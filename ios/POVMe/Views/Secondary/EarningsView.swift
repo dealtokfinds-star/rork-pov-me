@@ -19,20 +19,59 @@ struct EarningsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
-                balanceCard
-                statsRow
-                SectionHeader(kicker: "Money out", title: "Request a payout")
-                payoutCard
-                SectionHeader(kicker: "History", title: "Recent payouts")
-                payoutsList
-                SectionHeader(kicker: "Compliance", title: "Payout settings")
-                complianceCard
+                if !app.isVerified {
+                    kycGate
+                } else {
+                    balanceCard
+                    statsRow
+                    SectionHeader(kicker: "Money out", title: "Request a payout")
+                    payoutCard
+                    SectionHeader(kicker: "History", title: "Recent payouts")
+                    payoutsList
+                    SectionHeader(kicker: "Compliance", title: "Payout settings")
+                    complianceCard
+                }
             }
             .padding(.bottom, 40)
         }
         .background(Theme.bg.ignoresSafeArea())
         .navigationTitle("Earnings & payouts")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - KYC Gate
+
+    private var kycGate: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            ZStack {
+                Circle()
+                    .fill(Theme.lime.opacity(0.12))
+                    .frame(width: 66, height: 66)
+                    .overlay(Circle().stroke(Theme.lime.opacity(0.3), lineWidth: 1.5))
+                Image(systemName: "checkmark.shield.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(Theme.lime)
+            }
+            Text("Verify your identity to withdraw")
+                .font(.system(size: 22, weight: .heavy))
+                .tracking(-0.8)
+                .foregroundStyle(Theme.text)
+                .multilineTextAlignment(.center)
+            Text("Complete identity verification to request payouts and withdraw your earnings.")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Theme.textMid)
+                .multilineTextAlignment(.center)
+                .lineSpacing(5)
+            AppButton(label: "Go to verification") {
+                router.push(.becomeCreator)
+            }
+            .frame(width: 240)
+            .padding(.top, 8)
+            Spacer()
+        }
+        .padding(.horizontal, 30)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var balanceCard: some View {

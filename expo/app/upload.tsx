@@ -12,6 +12,7 @@ import {
   Lock,
   Loader,
   Radio,
+  ShieldCheck,
   Unlock,
   UploadCloud,
   Users,
@@ -40,7 +41,8 @@ type Phase = "choose" | "uploading" | "transcoding" | "ready" | "error";
 
 export default function UploadScreen() {
   const router = useRouter();
-  const { publishEpisode, creatorPrice } = useApp();
+  const { publishEpisode, creatorPrice, kycStatus } = useApp();
+  const isVerified = kycStatus === "verified";
 
   const [title, setTitle] = useState<string>("");
   const [description, setDescription] = useState<string>("");
@@ -253,7 +255,32 @@ export default function UploadScreen() {
     );
   }
 
-  const canPublish = phase === "ready";
+  const canPublish = phase === "ready" && isVerified;
+
+  // ---- KYC verification gate ----
+  if (!isVerified) {
+    return (
+      <View style={[styles.screen, { alignItems: "center", justifyContent: "center", padding: 30 }]}>
+        <View style={styles.kycGateIcon}>
+          <ShieldCheck size={28} color={Colors.lime} />
+        </View>
+        <Text style={styles.kycGateTitle}>Verify your identity to publish</Text>
+        <Text style={styles.kycGateBody}>
+          {kycStatus === "pending"
+            ? "Your verification is under review. You'll be able to publish once it's approved."
+            : kycStatus === "rejected"
+              ? `Your verification was rejected${kycStatus === "rejected" ? ". Please resubmit from the creator setup." : "."}`
+              : "Complete identity verification to upload and publish POV episodes."}
+        </Text>
+        <Button
+          label={kycStatus === "pending" ? "View status" : "Go to verification"}
+          onPress={() => router.push("/become-creator")}
+          style={{ marginTop: 24 }}
+        />
+        <Button label="Back" variant="ghost" onPress={() => router.back()} style={{ marginTop: 10 }} />
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={{ padding: 20, paddingBottom: 44 }} keyboardShouldPersistTaps="handled">
@@ -724,6 +751,32 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   doneBody: {
+    color: Colors.textMid,
+    fontSize: 14,
+    fontWeight: "500",
+    lineHeight: 21,
+    textAlign: "center",
+    marginTop: 12,
+  },
+  kycGateIcon: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    backgroundColor: "rgba(204,255,0,0.12)",
+    borderWidth: 1.5,
+    borderColor: "rgba(204,255,0,0.3)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  kycGateTitle: {
+    color: Colors.text,
+    fontSize: 22,
+    fontWeight: "900",
+    letterSpacing: -0.8,
+    marginTop: 20,
+    textAlign: "center",
+  },
+  kycGateBody: {
     color: Colors.textMid,
     fontSize: 14,
     fontWeight: "500",

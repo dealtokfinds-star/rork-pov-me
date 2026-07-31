@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Subscribe modal — monthly subscription to a creator via wallet or Stripe.
+/// Subscribe modal — monthly subscription to a creator via Stripe Checkout.
+/// Access is granted only after the webhook confirms the payment server-side.
 struct SubscribeView: View {
     let creatorId: String
     @Environment(AppState.self) private var app
@@ -106,7 +107,7 @@ struct SubscribeView: View {
             if success {
                 HStack(spacing: 10) {
                     Image(systemName: "checkmark.circle.fill").font(.system(size: 16)).foregroundStyle(Theme.success)
-                    Text("You're now living as \(c.name.split(separator: " ").first.map(String.init) ?? c.name).").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.success)
+                    Text("Checkout opened — complete your payment in Safari.").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.success)
                     Spacer()
                 }
                 .padding(.horizontal, 14).padding(.vertical, 12)
@@ -114,10 +115,10 @@ struct SubscribeView: View {
                 .overlay(RoundedRectangle(cornerRadius: Theme.rMd).stroke(Theme.success.opacity(0.35), lineWidth: 1))
                 .clipShape(.rect(cornerRadius: Theme.rMd))
             }
-            AppButton(label: processing ? "Processing…" : "Subscribe · \(Fmt.moneyComma(c.subPrice))/mo", disabled: processing) {
-                payWithWallet(c)
+            AppButton(label: processing ? "Opening checkout…" : "Subscribe · \(Fmt.moneyComma(c.subPrice))/mo", disabled: processing) {
+                Task { await payWithStripe(c) }
             }
-            Text("Charged to your POVMe wallet (\(Fmt.moneyComma(app.balance))) · cancel anytime in Settings")
+            Text("Secure checkout via Stripe. Access is granted once payment is confirmed.")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Theme.textDim)
                 .multilineTextAlignment(.center)
@@ -125,19 +126,17 @@ struct SubscribeView: View {
         }
     }
 
-    private func payWithWallet(_ c: Creator) {
+    private func payWithStripe(_ c: Creator) async {
         processing = true; error = nil; success = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if app.subscribe(c.id, price: c.subPrice) {
-                success = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                    processing = false
-                    router.pop()
-                }
-            } else {
-                processing = false
-                error = "Insufficient wallet balance. Top up first."
-            }
+        let result = await CheckoutClient.shared.openCheckout(
+            type: .sub, creatorId: c.id
+        )
+        processing = false
+        if result.success {
+            success = true
+            Hap.success()
+        } else {
+            error = result.error ?? "Checkout failed. Please try again."
         }
     }
 

@@ -1,16 +1,52 @@
 import SwiftUI
 import AVKit
+import Combine
 
-/// Episode detail — video player (when unlocked) or paywall, metadata, actions, related.
+/// Server-enforced access check for a VOD episode (mirrors Expo useEpisodeAccess).
+/// Calls the `episode-access` edge function which returns the video URL only if allowed.
+struct EpisodeAccessResponse: Decodable {
+    let allowed: Bool
+    let reason: String?
+    let videoUrl: String?
+    let price: Double?
+    let creatorId: String?
+}
+
+@MainActor
+final class EpisodeAccessManager: ObservableObject {
+    @Published var result: EpisodeAccessResponse?
+    @Published var isLoading: Bool = false
+    @Published var error: String?
+
+    func check(episodeId: String) async {
+        isLoading = true
+        error = nil
+        do {
+            let response: EpisodeAccessResponse = try await EdgeClient.shared.call(
+                "episode-access",
+                body: ["episodeId": episodeId],
+                as: EpisodeAccessResponse.self
+            )
+            result = response
+        } catch {
+            self.error = error.localizedDescription
+            result = EpisodeAccessResponse(allowed: false, reason: "not_found", videoUrl: nil, price: nil, creatorId: nil)
+        }
+        isLoading = false
+    }
+}
+
+/// Episode detail — video player (when server grants access) or paywall, metadata, actions, related.
 struct EpisodeView: View {
     let episodeId: String
     @Environment(AppState.self) private var app
     @Environment(Router.self) private var router
     @State private var player: AVPlayer?
+    @StateObject private var access = EpisodeAccessManager()
 
     private var episode: Episode? { Mock.episode(episodeId) }
     private var creator: Creator? { episode.flatMap { Mock.creator($0.creatorId) } }
-    private var unlocked: Bool { episode.map { app.canWatch($0) } ?? false }
+    private var unlocked: Bool { access.result?.allowed ?? false }
     private var cat: Category { Category.by(episode?.category ?? .trader) }
     private var saved: Bool { app.savedEpisodes.contains(episodeId) }
     private var liked: Bool { app.likedEpisodes.contains(episodeId) }
@@ -39,7 +75,12 @@ struct EpisodeView: View {
             }
             .background(Theme.bg.ignoresSafeArea())
             .ignoresSafeArea(edges: .top)
-            .onAppear { if unlocked, let v = episode.video.isEmpty ? nil : episode.video { setupPlayer(v) } }
+            .task { await access.check(episodeId: episodeId) }
+            .onChange(of: unlocked) { _, isUnlocked in
+                if isUnlocked, let videoUrl = access.result?.videoUrl, !videoUrl.isEmpty {
+                    setupPlayer(videoUrl)
+                }
+            }
             .onDisappear { player?.pause(); player = nil }
         } else {
             notFound
@@ -49,7 +90,9 @@ struct EpisodeView: View {
     private func stage(_ episode: Episode, _ creator: Creator) -> some View {
         ZStack {
             Color.black.frame(height: 460)
-            if unlocked {
+            if access.isLoading {
+                ProgressView().tint(Theme.lime)
+            } else if unlocked {
                 if let player {
                     VideoPlayer(player: player)
                         .frame(height: 460)

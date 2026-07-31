@@ -39,7 +39,6 @@ export default function ProfileScreen() {
     monthlySpend,
     savedEpisodes,
     likedEpisodes,
-    unlockedEpisodes,
     isCreator,
     totalSpent,
     resetAccount,
@@ -88,7 +87,7 @@ export default function ProfileScreen() {
           <View style={styles.badgeRow}>
             {isCreator ? <Tag label="Creator" color={Colors.ink} bg={Colors.lime} /> : null}
             <Tag label={`${activeSubs.length} lives subscribed`} color={Colors.text} bg="rgba(255,255,255,0.1)" />
-            <Tag label={`${unlockedEpisodes.length} POVs unlocked`} color={Colors.cyan} bg="rgba(53,231,255,0.12)" />
+            <Tag label={`${savedEpisodes.length} POVs saved`} color={Colors.cyan} bg="rgba(53,231,255,0.12)" />
           </View>
         </View>
       </View>

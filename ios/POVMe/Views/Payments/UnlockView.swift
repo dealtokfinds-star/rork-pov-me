@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Unlock modal — one-time PPV unlock for an episode via wallet.
+/// Unlock modal — one-time PPV unlock for an episode via Stripe Checkout.
+/// Access is granted only after the webhook confirms the payment server-side.
 struct UnlockView: View {
     let episodeId: String
     @Environment(AppState.self) private var app
@@ -97,7 +98,7 @@ struct UnlockView: View {
                         if success {
                             HStack(spacing: 10) {
                                 Image(systemName: "checkmark.circle.fill").font(.system(size: 16)).foregroundStyle(Theme.success)
-                                Text("Unlocked! Enjoy the POV.").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.success)
+                                Text("Checkout opened — complete your payment in Safari.").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.success)
                                 Spacer()
                             }
                             .padding(.horizontal, 14).padding(.vertical, 12)
@@ -105,10 +106,10 @@ struct UnlockView: View {
                             .overlay(RoundedRectangle(cornerRadius: Theme.rMd).stroke(Theme.success.opacity(0.35), lineWidth: 1))
                             .clipShape(.rect(cornerRadius: Theme.rMd))
                         }
-                        AppButton(label: processing ? "Processing…" : "Unlock for \(Fmt.moneyComma(price))", variant: .ppv, disabled: processing) {
-                            payWithWallet()
+                        AppButton(label: processing ? "Opening checkout…" : "Unlock for \(Fmt.moneyComma(price))", variant: .ppv, disabled: processing) {
+                            Task { await payWithStripe(creator) }
                         }
-                        Text("Charged to your POVMe wallet (\(Fmt.moneyComma(app.balance)))")
+                        Text("Secure checkout via Stripe. Access granted once payment is confirmed.")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Theme.textDim)
                     }
@@ -143,19 +144,17 @@ struct UnlockView: View {
         }
     }
 
-    private func payWithWallet() {
+    private func payWithStripe(_ creator: Creator) async {
         processing = true; error = nil; success = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if app.unlockEpisode(episodeId, price: price) {
-                success = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                    processing = false
-                    router.pop()
-                }
-            } else {
-                processing = false
-                error = "Insufficient wallet balance. Top up first."
-            }
+        let result = await CheckoutClient.shared.openCheckout(
+            type: .ppv, amount: price, creatorId: creator.id, episodeId: episodeId
+        )
+        processing = false
+        if result.success {
+            success = true
+            Hap.success()
+        } else {
+            error = result.error ?? "Checkout failed. Please try again."
         }
     }
 }

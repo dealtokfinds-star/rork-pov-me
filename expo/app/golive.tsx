@@ -32,7 +32,8 @@ const PPV_PRICES = [3.99, 6.99, 9.99, 14.99];
 
 export default function GoLiveScreen() {
   const router = useRouter();
-  const { creatorPrice, creatorStats } = useApp();
+  const { creatorPrice, creatorStats, kycStatus } = useApp();
+  const isVerified = kycStatus === "verified";
   const [title, setTitle] = useState<string>("");
   const [category, setCategory] = useState<PovCategory>("founder");
   const [access, setAccess] = useState<StreamAccess>("public");
@@ -116,6 +117,31 @@ export default function GoLiveScreen() {
     }
   }, [title, category, access, ppvPrice, source, replay, slowMode, subOnlyChat, router]);
 
+  // ---- KYC verification gate ----
+  if (!isVerified) {
+    return (
+      <View style={[styles.screen, { alignItems: "center", justifyContent: "center", padding: 30 }]}>
+        <View style={styles.kycGateIcon}>
+          <ShieldCheck size={28} color={Colors.lime} />
+        </View>
+        <Text style={styles.kycGateTitle}>Verify your identity to go live</Text>
+        <Text style={styles.kycGateBody}>
+          {kycStatus === "pending"
+            ? "Your verification is under review. You'll be able to go live once it's approved."
+            : kycStatus === "rejected"
+              ? "Your verification was rejected. Please resubmit from the creator setup."
+              : "Complete identity verification to start broadcasting live POV streams."}
+        </Text>
+        <Button
+          label={kycStatus === "pending" ? "View status" : "Go to verification"}
+          onPress={() => router.push("/become-creator")}
+          style={{ marginTop: 24 }}
+        />
+        <Button label="Back" variant="ghost" onPress={() => router.back()} style={{ marginTop: 10 }} />
+      </View>
+    );
+  }
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={{ padding: 20, paddingBottom: 44 }} keyboardShouldPersistTaps="handled">
       <Text style={styles.kicker}>Set up your live POV</Text>
@@ -182,7 +208,7 @@ export default function GoLiveScreen() {
         <SourceOption
           icon={<Lock size={17} color={access === "subscribers" ? Colors.ink : Colors.lime} />}
           title={`Subscribers only · ${formatMoney(creatorPrice)}/mo`}
-          body={`Your ${formatCount(creatorStats.subs)} subs get in free`}
+          body={`Your ${formatCount(creatorStats.subscriberCount)} subs get in free`}
           active={access === "subscribers"}
           accent={Colors.lime}
           onPress={() => setAccess("subscribers")}
@@ -456,4 +482,30 @@ const styles = StyleSheet.create({
   },
   consentTitle: { color: Colors.text, fontSize: 22, fontWeight: "900", letterSpacing: -0.6 },
   consentBody: { color: Colors.textMid, fontSize: 13.5, fontWeight: "500", lineHeight: 20 },
+  kycGateIcon: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    backgroundColor: "rgba(204,255,0,0.12)",
+    borderWidth: 1.5,
+    borderColor: "rgba(204,255,0,0.3)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  kycGateTitle: {
+    color: Colors.text,
+    fontSize: 22,
+    fontWeight: "900",
+    letterSpacing: -0.8,
+    marginTop: 20,
+    textAlign: "center",
+  },
+  kycGateBody: {
+    color: Colors.textMid,
+    fontSize: 14,
+    fontWeight: "500",
+    lineHeight: 21,
+    textAlign: "center",
+    marginTop: 12,
+  },
 });

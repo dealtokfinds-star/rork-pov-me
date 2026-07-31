@@ -14,7 +14,7 @@ const PRESETS = [2, 5, 10, 20, 50, 100];
 export default function TipScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { tip, tipViaStripe, balance, tipTotals } = useApp();
+  const { tipViaStripe, balance } = useApp();
   const [amount, setAmount] = useState<number>(5);
   const [custom, setCustom] = useState<string>("");
   const [note, setNote] = useState<string>("");
@@ -40,7 +40,6 @@ export default function TipScreen() {
 
   const resolved = custom.trim().length > 0 ? Number(custom) : amount;
   const valid = Number.isFinite(resolved) && resolved >= 1;
-  const already = tipTotals[creator.id] ?? 0;
 
   if (sent !== null) {
     return (
@@ -64,7 +63,7 @@ export default function TipScreen() {
         <Avatar uri={creator.avatar} size={58} ring live={creator.isLive} />
         <Text style={styles.title}>Tip {creator.name.split(" ")[0]}</Text>
         <Text style={styles.subtitle}>
-          {creator.identity} · {already > 0 ? `you've tipped ${formatMoney(already)}` : "first tip"}
+          {creator.identity} · send support
         </Text>
       </View>
 
@@ -115,14 +114,22 @@ export default function TipScreen() {
           <PressableScale
             key={g.id}
             scaleTo={0.9}
-            onPress={() => {
-              const ok = tip(creator.id, g.price, g.name);
-              if (!ok) {
-                setError(`Wallet has ${formatMoney(balance)}. Top up to send gifts.`);
-                return;
+            onPress={async () => {
+              setProcessing(true);
+              setError(null);
+              try {
+                const result = await tipViaStripe(creator.id, g.price, g.name);
+                if (result.success) {
+                  haptic("success");
+                  setSent(g.price);
+                } else {
+                  setError(result.error ?? "Tip failed");
+                }
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Tip failed");
+              } finally {
+                setProcessing(false);
               }
-              haptic("success");
-              setSent(g.price);
             }}
           >
             <View style={styles.giftCard}>
@@ -154,24 +161,11 @@ export default function TipScreen() {
             if (result.success) {
               haptic("success");
               setSent(resolved);
-              return;
-            }
-            // Fallback to wallet-based mock
-            const ok = tip(creator.id, resolved);
-            if (!ok) {
-              setError(result.error ?? `Wallet has ${formatMoney(balance)}. Top up to tip.`);
             } else {
-              haptic("success");
-              setSent(resolved);
+              setError(result.error ?? "Tip failed");
             }
           } catch (err) {
-            const ok = tip(creator.id, resolved);
-            if (!ok) {
-              setError(err instanceof Error ? err.message : "Tip failed");
-            } else {
-              haptic("success");
-              setSent(resolved);
-            }
+            setError(err instanceof Error ? err.message : "Tip failed");
           } finally {
             setProcessing(false);
           }

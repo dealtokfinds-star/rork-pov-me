@@ -28,13 +28,13 @@ import {
 } from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
 import { useCreator, useEpisode, useEpisodes } from "@/lib/data";
+import { useEpisodeAccess } from "@/hooks/useAccess";
 
 export default function EpisodeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const {
-    canWatch,
     isSubscribed,
     toggleSaved,
     savedEpisodes,
@@ -45,10 +45,15 @@ export default function EpisodeScreen() {
   const { data: episode, isLoading } = useEpisode(id ?? "");
   const { data: creator } = useCreator(episode?.creatorId);
   const { data: allEpisodes = [] } = useEpisodes();
-  const unlocked = episode ? canWatch(episode) : false;
+
+  // Server-enforced access check — the edge function checks subscription/
+  // unlock rows and returns the video URL only if access is granted.
+  const { data: accessResult, isLoading: accessLoading } = useEpisodeAccess(id);
+  const unlocked = accessResult?.allowed ?? false;
+  const videoUrl = accessResult?.videoUrl ?? null;
 
   const player = useVideoPlayer(
-    unlocked && episode ? episode.video : null,
+    unlocked && videoUrl ? videoUrl : null,
     (p) => {
       p.loop = true;
       p.muted = false;
@@ -61,7 +66,7 @@ export default function EpisodeScreen() {
     [allEpisodes, episode],
   );
 
-  if (isLoading) {
+  if (isLoading || accessLoading) {
     return (
       <View style={[styles.screen, { alignItems: "center", justifyContent: "center" }]}>
         <Text style={{ color: Colors.textMid, fontSize: 14, fontWeight: 700 }}>Loading…</Text>

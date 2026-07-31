@@ -15,7 +15,7 @@ struct CreatorView: View {
     private var premium: [Episode] { episodes.filter { $0.access == .ppv } }
     private var free: [Episode] { episodes.filter { $0.access == .free } }
     private var subbed: Bool { app.isSubscribed(creatorId) }
-    private var tipped: Double { app.tipTotals[creatorId] ?? 0 }
+    private var tipped: Double { 0 }
 
     var body: some View {
         if let creator {

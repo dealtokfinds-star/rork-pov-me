@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Tip modal — send a one-time tip or gift to a creator via wallet.
+/// Tip modal — send a one-time tip or gift to a creator via Stripe Checkout.
 struct TipView: View {
     let creatorId: String
     @Environment(AppState.self) private var app
@@ -109,7 +109,7 @@ struct TipView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 10)], spacing: 10) {
                 ForEach(Mock.gifts) { g in
                     PressableButton(scaleTo: 0.94, haptic: Hap.medium) {
-                        sendGift(c, gift: g)
+                        Task { await sendGift(c, gift: g) }
                     } label: {
                         VStack(spacing: 5) {
                             Text(g.emoji).font(.system(size: 24))
@@ -123,6 +123,7 @@ struct TipView: View {
                         .clipShape(.rect(cornerRadius: Theme.rMd))
                     }
                     .buttonStyle(.plain)
+                    .disabled(processing)
                 }
             }
         }
@@ -145,7 +146,7 @@ struct TipView: View {
             if success {
                 HStack(spacing: 10) {
                     Image(systemName: "checkmark.circle.fill").font(.system(size: 16)).foregroundStyle(Theme.success)
-                    Text("Tip sent! \(c.name.split(separator: " ").first.map(String.init) ?? c.name) appreciates you 💚").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.success)
+                    Text("Checkout opened — complete your payment in Safari.").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.success)
                     Spacer()
                 }
                 .padding(.horizontal, 14).padding(.vertical, 12)
@@ -154,41 +155,40 @@ struct TipView: View {
                 .clipShape(.rect(cornerRadius: Theme.rMd))
             }
             let amount = customAmount.isEmpty ? selectedAmount : (Double(customAmount) ?? 0)
-            AppButton(label: processing ? "Sending…" : "Send \(Fmt.moneyComma(amount)) tip", disabled: processing || amount <= 0) {
-                sendTip(c, amount: amount)
+            AppButton(label: processing ? "Opening checkout…" : "Send \(Fmt.moneyComma(amount)) tip", disabled: processing || amount <= 0) {
+                Task { await sendTip(c, amount: amount) }
             }
-            Text("Wallet balance: \(Fmt.moneyComma(app.balance))")
+            Text("Secure checkout via Stripe. \(c.name.split(separator: " ").first.map(String.init) ?? c.name) keeps 80%.")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Theme.textDim)
         }
     }
 
-    private func sendTip(_ c: Creator, amount: Double) {
+    private func sendTip(_ c: Creator, amount: Double) async {
         processing = true; error = nil; success = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if app.tip(c.id, amount: amount) {
-                success = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                    processing = false
-                    router.pop()
-                }
-            } else {
-                processing = false
-                error = "Insufficient wallet balance. Top up first."
-            }
+        let result = await CheckoutClient.shared.openCheckout(
+            type: .tip, amount: amount, creatorId: c.id
+        )
+        processing = false
+        if result.success {
+            success = true
+            Hap.success()
+        } else {
+            error = result.error ?? "Checkout failed. Please try again."
         }
     }
 
-    private func sendGift(_ c: Creator, gift: Gift) {
-        if app.tip(c.id, amount: gift.price, label: gift.name) {
+    private func sendGift(_ c: Creator, gift: Gift) async {
+        processing = true; error = nil; success = false
+        let result = await CheckoutClient.shared.openCheckout(
+            type: .tip, amount: gift.price, creatorId: c.id, message: gift.name
+        )
+        processing = false
+        if result.success {
             success = true
-            error = nil
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                router.pop()
-            }
+            Hap.success()
         } else {
-            error = "Insufficient wallet balance. Top up first."
-            success = false
+            error = result.error ?? "Checkout failed. Please try again."
         }
     }
 }

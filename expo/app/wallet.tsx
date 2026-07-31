@@ -18,13 +18,15 @@ import Colors, { Radius, microLabel } from "@/constants/colors";
 import { formatMoney } from "@/constants/mock-data";
 import { useCreator } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
+import { useTransactions } from "@/hooks/useServerData";
 import type { Transaction } from "@/types";
 
 const TOPUPS = [25, 50, 100, 250];
 
 export default function WalletScreen() {
   const router = useRouter();
-  const { balance, topUp, topUpViaStripe, transactions, monthlySpend, totalSpent, refreshWallet } = useApp();
+  const { balance, topUpViaStripe, monthlySpend, totalSpent, refreshWallet } = useApp();
+  const { data: transactions = [] } = useTransactions();
   const [processing, setProcessing] = useState<number | null>(null);
   const [payError, setPayError] = useState<string | null>(null);
 

@@ -4,7 +4,7 @@ import SwiftUI
 struct AnalyticsView: View {
     @Environment(AppState.self) private var app
 
-    private var published: [StudioEpisode] { app.studio.filter { $0.status == .published } }
+    private var published: [StudioEpisode] { [] }
 
     var body: some View {
         ScrollView {

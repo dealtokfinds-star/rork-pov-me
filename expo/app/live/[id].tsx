@@ -35,10 +35,11 @@ import {
   GIFTS,
   formatCount,
   formatMoney,
-  randomChat,
 } from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
 import { useCreator, useStream } from "@/lib/data";
+import { useStreamAccess } from "@/hooks/useAccess";
+import { useStreamChat } from "@/hooks/useChat";
 import type { ChatMessage } from "@/types";
 
 const QUICK_TIPS = [2, 5, 10, 25];
@@ -49,10 +50,9 @@ export default function LiveRoomScreen() {
   const router = useRouter();
   const {
     isSubscribed,
-    hasStreamAccess,
-    unlockStream,
-    subscribe,
-    tip,
+    unlockViaStripe,
+    subscribeViaStripe,
+    tipViaStripe,
     balance,
     displayName,
   } = useApp();
@@ -60,42 +60,42 @@ export default function LiveRoomScreen() {
   const { data: stream, isLoading } = useStream(id ?? "");
   const { data: creator } = useCreator(stream?.creatorId);
 
-  const [messages, setMessages] = useState<ChatMessage[]>(() =>
-    Array.from({ length: 8 }, () => randomChat()),
-  );
+  // Server-enforced access check
+  const { data: accessResult, isLoading: accessLoading } = useStreamAccess(id);
+  const access = accessResult?.allowed ?? false;
+  const hlsUrl = accessResult?.hlsPlaybackUrl ?? null;
+
+  // Real chat via Supabase Realtime
+  const {
+    messages: chatMessages,
+    viewerCount: realViewerCount,
+    sendChat,
+  } = useStreamChat(id ?? null);
+
+  const [messages, setMessages] = useState<ChatMessage[]>(chatMessages);
   const [draft, setDraft] = useState<string>("");
   const [giftOpen, setGiftOpen] = useState<boolean>(false);
   const [hearts, setHearts] = useState<{ id: number; x: number }[]>([]);
-  const [viewers, setViewers] = useState<number>(stream?.viewers ?? 0);
+  const [viewers, setViewers] = useState<number>(stream?.viewers ?? realViewerCount ?? 0);
   const [banner, setBanner] = useState<string | null>(null);
+  const [paymentPending, setPaymentPending] = useState<boolean>(false);
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const heartId = useRef<number>(0);
 
-  const access = useMemo(() => {
-    if (!stream) return false;
-    if (stream.access === "public") return true;
-    if (stream.access === "subscribers") return isSubscribed(stream.creatorId);
-    return hasStreamAccess(stream.id) || isSubscribed(stream.creatorId);
-  }, [stream, isSubscribed, hasStreamAccess]);
+  // Sync real chat messages
+  useEffect(() => {
+    setMessages(chatMessages);
+  }, [chatMessages]);
 
-  const player = useVideoPlayer(access && stream ? stream.video : null, (p) => {
+  // Use real viewer count from presence + server
+  useEffect(() => {
+    setViewers(stream?.viewers ?? realViewerCount ?? 0);
+  }, [stream?.viewers, realViewerCount]);
+
+  const player = useVideoPlayer(access && hlsUrl ? hlsUrl : null, (p) => {
     p.loop = true;
     if (access) p.play();
   });
-
-  useEffect(() => {
-    if (!access) return;
-    const chatTimer = setInterval(() => {
-      setMessages((prev) => [...prev.slice(-60), randomChat()]);
-    }, 2300);
-    const viewerTimer = setInterval(() => {
-      setViewers((v) => Math.max(50, v + Math.floor(Math.random() * 90) - 30));
-    }, 3400);
-    return () => {
-      clearInterval(chatTimer);
-      clearInterval(viewerTimer);
-    };
-  }, [access]);
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -108,23 +108,17 @@ export default function LiveRoomScreen() {
     setTimeout(() => setBanner(null), 2600);
   }, []);
 
-  const sendChat = useCallback(() => {
+  const handleSendChat = useCallback(async () => {
     const text = draft.trim();
     if (text.length === 0) return;
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `me${Date.now()}`,
-        user: displayName,
-        color: Colors.lime,
-        text,
-        kind: "chat",
-        badge: stream && isSubscribed(stream.creatorId) ? "sub" : undefined,
-      },
-    ]);
-    setDraft("");
-    haptic("light");
-  }, [draft, displayName, stream, isSubscribed]);
+    const result = await sendChat(text);
+    if (result.ok) {
+      setDraft("");
+      haptic("light");
+    } else {
+      showBanner(result.error ?? "Failed to send");
+    }
+  }, [draft, sendChat]);
 
   const popHeart = useCallback(() => {
     heartId.current += 1;
@@ -137,33 +131,23 @@ export default function LiveRoomScreen() {
   }, []);
 
   const sendTip = useCallback(
-    (amount: number, label?: string) => {
+    async (amount: number, label?: string) => {
       if (!stream) return;
-      const ok = tip(stream.creatorId, amount, label);
-      if (!ok) {
-        showBanner("Not enough wallet balance — top up to keep supporting.");
+      setPaymentPending(true);
+      const result = await tipViaStripe(stream.creatorId, amount, label);
+      setPaymentPending(false);
+      if (!result.success) {
+        showBanner(result.error ?? "Tip failed");
         return;
       }
       haptic("success");
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `tip${Date.now()}`,
-          user: displayName,
-          color: Colors.gold,
-          text: label ? `sent ${label}` : "tipped the stream",
-          kind: label ? "gift" : "tip",
-          amount,
-          badge: "top",
-        },
-      ]);
       setGiftOpen(false);
       showBanner(`${label ?? "Tip"} sent · ${formatMoney(amount)}`);
     },
-    [stream, tip, displayName, showBanner],
+    [stream, tipViaStripe, showBanner],
   );
 
-  if (isLoading) {
+  if (isLoading || accessLoading) {
     return (
       <View style={[styles.screen, { alignItems: "center", justifyContent: "center" }]}>
         <Text style={{ color: Colors.textMid, fontSize: 14, fontWeight: 700 }}>Loading…</Text>
@@ -217,22 +201,26 @@ export default function LiveRoomScreen() {
           </View>
           {banner ? <Text style={styles.gateWarn}>{banner}</Text> : null}
           <Button
-            label={isPpv ? `Unlock live · ${formatMoney(price)}` : `Subscribe · ${formatMoney(price)}/mo`}
+            label={paymentPending ? "Processing…" : isPpv ? `Unlock live · ${formatMoney(price)}` : `Subscribe · ${formatMoney(price)}/mo`}
             variant={isPpv ? "ppv" : "primary"}
-            onPress={() => {
-              const ok = isPpv
-                ? unlockStream(stream.id, price, stream.creatorId)
-                : subscribe(stream.creatorId, price);
-              if (!ok) {
-                showBanner(`Wallet balance is ${formatMoney(balance)} — top up to join.`);
+            disabled={paymentPending}
+            onPress={async () => {
+              setPaymentPending(true);
+              const result = isPpv
+                ? await unlockViaStripe(stream.id, price, stream.creatorId, stream.id)
+                : await subscribeViaStripe(stream.creatorId, price);
+              setPaymentPending(false);
+              if (!result.success) {
+                showBanner(result.error ?? "Payment failed");
                 return;
               }
               haptic("success");
+              showBanner("Payment processing — access will be granted shortly.");
             }}
             style={{ marginTop: 22 }}
           />
           <Button
-            label="Add funds to wallet"
+            label="Top up wallet"
             variant="ghost"
             small
             onPress={() => router.push("/wallet")}
@@ -362,10 +350,10 @@ export default function LiveRoomScreen() {
               placeholder="Say something…"
               placeholderTextColor={Colors.textDim}
               style={styles.input}
-              onSubmitEditing={sendChat}
+              onSubmitEditing={handleSendChat}
               returnKeyType="send"
             />
-            <PressableScale onPress={sendChat} scaleTo={0.85}>
+            <PressableScale onPress={handleSendChat} scaleTo={0.85}>
               <View style={styles.sendCircle}>
                 <Send size={14} color={Colors.ink} />
               </View>

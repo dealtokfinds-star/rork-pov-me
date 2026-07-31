@@ -8,7 +8,7 @@
  * (the overlay only captures touches on its own input row + reaction buttons).
  *
  * Features:
- *  - Simulated incoming chat stream (production: swap the timer for a WS/SSE feed)
+ *  - Real chat messages passed in via initialMessages (from Supabase Realtime)
  *  - Slow-mode: enforces a cooldown between user messages
  *  - Sub/mod/top badges, colored usernames, tip + gift + join events
  *  - Floating heart reactions with haptics
@@ -42,7 +42,7 @@ import {
 
 import { PressableScale, haptic } from "@/components/ui";
 import Colors, { Radius } from "@/constants/colors";
-import { CHAT_COLORS, GIFTS, randomChat } from "@/constants/mock-data";
+import { CHAT_COLORS, GIFTS } from "@/constants/mock-data";
 import type { ChatMessage } from "@/types";
 
 export interface ChatOverlayHandle {
@@ -53,12 +53,8 @@ export interface ChatOverlayHandle {
 }
 
 interface ChatOverlayProps {
-  /** Initial messages (optional). */
+  /** Initial messages (real chat messages from Supabase Realtime). */
   initialMessages?: ChatMessage[];
-  /** Auto-generate incoming chat while mounted. Default true. */
-  simulateIncoming?: boolean;
-  /** Interval (ms) between simulated messages. Default 2300. */
-  incomingIntervalMs?: number;
   /** Max messages kept in memory. Default 80. */
   maxMessages?: number;
   /** Slow mode cooldown in seconds. 0 = disabled. Default 0. */
@@ -88,8 +84,6 @@ export const ChatOverlay = forwardRef<ChatOverlayHandle, ChatOverlayProps>(
   function ChatOverlay(
     {
       initialMessages,
-      simulateIncoming = true,
-      incomingIntervalMs = 2300,
       maxMessages = 80,
       slowModeSec = 0,
       subOnly = false,
@@ -105,7 +99,7 @@ export const ChatOverlay = forwardRef<ChatOverlayHandle, ChatOverlayProps>(
     ref,
   ) {
     const [messages, setMessages] = useState<ChatMessage[]>(
-      () => initialMessages ?? Array.from({ length: 6 }, () => randomChat()),
+      () => initialMessages ?? [],
     );
     const [draft, setDraft] = useState<string>("");
     const [giftOpen, setGiftOpen] = useState<boolean>(false);
@@ -128,16 +122,6 @@ export const ChatOverlay = forwardRef<ChatOverlayHandle, ChatOverlayProps>(
       }),
       [maxMessages],
     );
-
-    // ---- simulated incoming chat --------------------------------------------
-
-    useEffect(() => {
-      if (!simulateIncoming) return;
-      const timer = setInterval(() => {
-        setMessages((prev) => [...prev.slice(-(maxMessages - 1)), randomChat()]);
-      }, incomingIntervalMs);
-      return () => clearInterval(timer);
-    }, [simulateIncoming, incomingIntervalMs, maxMessages]);
 
     // ---- auto-scroll --------------------------------------------------------
 

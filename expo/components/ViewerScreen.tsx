@@ -2,9 +2,9 @@
  * ViewerScreen
  * ------------
  * Watches a live POV stream. Replaces the inline `live/[id]` viewer when the
- * host is broadcasting from `HostScreen`; works equally well for simulated
- * mock streams (driven by `expo-video` playback) so the experience is real
- * on devices without an active broadcaster.
+ * host is broadcasting from `HostScreen`. Playback uses the signed HLS URL
+ * from the `stream-access` edge function — no playback until the server
+ * confirms access.
  *
  * Responsibilities:
  *  - Access gate: public / subscriber-only / PPV (routes to subscribe or unlock)
@@ -47,6 +47,7 @@ import {
 } from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
 import { useCreator, useStream } from "@/lib/data";
+import { useStreamAccess } from "@/hooks/useAccess";
 import type { StreamAccess } from "@/types";
 
 interface ViewerScreenProps {
@@ -72,10 +73,9 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
   const router = useRouter();
   const {
     isSubscribed,
-    hasStreamAccess,
-    unlockStream,
-    subscribe,
-    tip,
+    unlockViaStripe,
+    subscribeViaStripe,
+    tipViaStripe,
     balance,
     displayName,
   } = useApp();
@@ -85,50 +85,39 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
   const stream = props.videoSource ? null : dbStream;
   const { data: creator } = useCreator(props.creatorId ?? stream?.creatorId ?? "");
 
+  // Server-enforced access check (only when not using a forced video source)
+  const { data: accessResult } = useStreamAccess(props.streamId ?? routeParams.id ?? null);
+
   const [viewers, setViewers] = useState<number>(stream?.viewers ?? 0);
   const [health, setHealth] = useState<ViewHealth>("loading");
   const [banner, setBanner] = useState<string | null>(null);
   const [reconnectAttempts, setReconnectAttempts] = useState<number>(0);
+  const [paymentPending, setPaymentPending] = useState<boolean>(false);
   const chatRef = useRef<ChatOverlayHandle>(null);
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Access gate (memoized so we don't recompute every render).
+  // Access gate — server is source of truth. Props.forcedAccess + videoSource
+  // bypass for real host broadcasts (the host already has access).
   const access = useMemo(() => {
-    const level = props.forcedAccess ?? stream?.access ?? "public";
-    if (level === "public") return true;
-    if (level === "subscribers") {
-      return isSubscribed(props.creatorId ?? stream?.creatorId ?? "");
-    }
-    return (
-      hasStreamAccess(props.streamId ?? routeParams.id ?? "") ||
-      isSubscribed(props.creatorId ?? stream?.creatorId ?? "")
-    );
-  }, [
-    props.forcedAccess,
-    props.streamId,
-    props.creatorId,
-    stream,
-    routeParams.id,
-    isSubscribed,
-    hasStreamAccess,
-  ]);
+    if (props.videoSource) return true; // Real host broadcast — always has access
+    if (props.forcedAccess) return true;
+    return accessResult?.allowed ?? false;
+  }, [props.videoSource, props.forcedAccess, accessResult]);
 
   // Video player — only mounted when access is granted.
-  const videoSource = props.videoSource ?? stream?.video ?? null;
+  const videoSource = props.videoSource ?? accessResult?.hlsPlaybackUrl ?? stream?.video ?? null;
   const player = useVideoPlayer(access ? videoSource : null, (p) => {
     p.loop = true;
     p.play();
   });
 
-  // ---- viewer count + reconnect simulation ---------------------------------
+  // ---- viewer count (real, from server) -----------------------------------
 
   useEffect(() => {
     if (!access) return;
-    const viewerTimer = setInterval(() => {
-      setViewers((v) => Math.max(50, v + Math.floor(Math.random() * 90) - 30));
-    }, 3400);
-    return () => clearInterval(viewerTimer);
-  }, [access]);
+    // Use the real viewer count from the stream row — updated by bump_stream_viewers RPC.
+    setViewers(stream?.viewers ?? 0);
+  }, [access, stream?.viewers]);
 
   // Brief loading → playing transition so the UI shows a spinner state.
   useEffect(() => {
@@ -188,18 +177,18 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
   // ---- tip routing ---------------------------------------------------------
 
   const handleTip = useCallback(
-    (amount: number, label?: string) => {
+    async (amount: number, label?: string) => {
       const cid = props.creatorId ?? stream?.creatorId ?? "";
       if (!cid) return;
-      const ok = tip(cid, amount, label);
-      if (!ok) {
-        showBanner("Not enough wallet balance — top up to keep supporting.");
+      const result = await tipViaStripe(cid, amount, label);
+      if (!result.success) {
+        showBanner(result.error ?? "Tip failed");
         return;
       }
       haptic("success");
       showBanner(`${label ?? "Tip"} sent · ${formatMoney(amount)}`);
     },
-    [props.creatorId, stream, tip, showBanner],
+    [props.creatorId, stream, tipViaStripe, showBanner],
   );
 
   // ---- not found -----------------------------------------------------------
@@ -274,22 +263,28 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
           ) : null}
           {banner ? <Text style={styles.gateWarn}>{banner}</Text> : null}
           <Button
-            label={isPpv ? `Unlock live · ${formatMoney(price)}` : `Subscribe · ${formatMoney(price)}/mo`}
+            label={paymentPending ? "Processing…" : isPpv ? `Unlock live · ${formatMoney(price)}` : `Subscribe · ${formatMoney(price)}/mo`}
             variant={isPpv ? "ppv" : "primary"}
-            onPress={() => {
+            disabled={paymentPending}
+            onPress={async () => {
               const sid = props.streamId ?? routeParams.id ?? "";
               const cid = props.creatorId ?? stream?.creatorId ?? "";
-              const ok = isPpv ? unlockStream(sid, price, cid) : subscribe(cid, price);
-              if (!ok) {
-                showBanner(`Wallet balance is ${formatMoney(balance)} — top up to join.`);
+              setPaymentPending(true);
+              const result = isPpv
+                ? await unlockViaStripe(sid, price, cid, sid)
+                : await subscribeViaStripe(cid, price);
+              setPaymentPending(false);
+              if (!result.success) {
+                showBanner(result.error ?? "Payment failed");
                 return;
               }
               haptic("success");
+              showBanner("Payment processing — access will be granted shortly.");
             }}
             style={{ marginTop: 22 }}
           />
           <Button
-            label="Add funds to wallet"
+            label="Top up wallet"
             variant="ghost"
             small
             onPress={() => router.push("/wallet")}
@@ -439,8 +434,6 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
       <View style={styles.chatLayer}>
         <ChatOverlay
           ref={chatRef}
-          simulateIncoming
-          incomingIntervalMs={2300}
           maxMessages={80}
           displayName={displayName}
           onSendTip={handleTip}

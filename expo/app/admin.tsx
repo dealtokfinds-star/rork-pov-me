@@ -10,14 +10,16 @@ import { formatMoney } from "@/constants/mock-data";
 import { useAdminCategories, useCategories, type CategoryInput } from "@/hooks/useDiscovery";
 import { useProfile } from "@/hooks/useProfile";
 import { useAdmin, type ReportRow, type AdminCreatorRow, type PendingApplicationRow } from "@/hooks/useAdmin";
+import { useAuditLogs, type AuditLogRow } from "@/hooks/useServerData";
 import { getKycDocumentSignedUrl } from "@/lib/creator-onboarding";
 
-type Tab = "queue" | "creators" | "payments" | "categories";
+type Tab = "queue" | "creators" | "payments" | "categories" | "audit";
 
 export default function AdminScreen() {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>("queue");
   const { reports, creators, revenue, applications, isLoading: adminLoading, adminAction, approveCreator, rejectCreator } = useAdmin();
+  const { data: auditLogs = [] } = useAuditLogs();
   const { account } = useProfile();
   const [resolved, setResolved] = useState<string[]>([]);
   const [approved, setApproved] = useState<string[]>([]);
@@ -44,8 +46,8 @@ export default function AdminScreen() {
         <StatTile label="Pending creators" value={`${applications.length}`} sub="KYC submitted" accent={Colors.cyan} />
       </View>
       <View style={styles.statRow}>
-        <StatTile label="Auto-flags" value="128" sub="last 7 days" accent={Colors.gold} />
-        <StatTile label="Held payouts" value={formatMoney(2140)} sub="2 accounts" accent={Colors.danger} />
+        <StatTile label="Held payouts" value={formatMoney(creators.filter((c) => c.stripe_account_status === "payout_held").reduce((sum, c) => sum + Number(c.payout_balance ?? 0), 0))} sub={`${creators.filter((c) => c.stripe_account_status === "payout_held").length} accounts`} accent={Colors.danger} />
+        <StatTile label="Audit actions" value={`${auditLogs.length}`} sub="logged" accent={Colors.gold} />
       </View>
 
       <View style={styles.tabRow}>
@@ -53,6 +55,7 @@ export default function AdminScreen() {
         <Chip label="Applications" active={tab === "creators"} onPress={() => setTab("creators")} />
         <Chip label="Categories" active={tab === "categories"} onPress={() => setTab("categories")} />
         <Chip label="Payments" active={tab === "payments"} onPress={() => setTab("payments")} />
+        <Chip label="Audit log" active={tab === "audit"} onPress={() => setTab("audit")} />
       </View>
 
       {tab === "queue" ? (
@@ -194,6 +197,34 @@ export default function AdminScreen() {
       ) : null}
 
       {tab === "categories" ? <CategoryManager /> : null}
+
+      {tab === "audit" ? (
+        <View style={{ paddingHorizontal: 18, gap: 10, marginTop: 18 }}>
+          {auditLogs.length === 0 ? (
+            <Text style={styles.cardMeta}>No audit log entries yet.</Text>
+          ) : (
+            auditLogs.map((log: AuditLogRow) => (
+              <View key={log.id} style={styles.card}>
+                <View style={styles.cardHead}>
+                  <View style={[styles.thumb, { backgroundColor: Colors.surfaceHi, alignItems: "center", justifyContent: "center" }]}>
+                    <Shield size={18} color={Colors.textDim} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardTitle}>{log.action.replace(/_/g, " ")}</Text>
+                    <Text style={styles.cardMeta}>
+                      {log.target_id ? `Target: ${log.target_id.slice(0, 8)} · ` : ""}
+                      {log.reason ?? "No reason given"}
+                    </Text>
+                    <Text style={styles.cardMeta}>
+                      {log.created_at ? new Date(log.created_at).toLocaleString() : ""}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+      ) : null}
     </ScrollView>
   );
 }

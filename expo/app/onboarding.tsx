@@ -82,7 +82,7 @@ const TOTAL_STEPS = READY_STEP + 1; // 0-indexed progress uses step+1
 export default function OnboardingScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { completeOnboarding, toggleFollow } = useApp();
+  const { completeOnboarding } = useApp();
   const { updateProfile } = useProfile();
   const [step, setStep] = useState<number>(0);
   const [name, setName] = useState<string>("");
@@ -121,7 +121,6 @@ export default function OnboardingScreen() {
   const finish = async (): Promise<void> => {
     setFinishing(true);
     // Persist followed creators into local app state so the Following feed seeds.
-    followed.forEach((id) => toggleFollow(id));
     try {
       await updateProfile({
         name: name.trim() || null,
@@ -471,12 +470,12 @@ function ReadyStep({
           label="Following"
           value={followedCount > 0 ? `${followedCount} creators` : "Explore later"}
         />
-        <SummaryRow label="Wallet" value="$120 demo credit" accent={Colors.lime} />
+        <SummaryRow label="Wallet" value="$0.00 — top up to start" accent={Colors.textDim} />
       </View>
 
       <Text style={styles.walletNote}>
-        We&apos;ve dropped $120 in demo credit into your wallet so you can subscribe,
-        unlock, and tip right away. No card needed to explore.
+        Add funds to your wallet whenever you&apos;re ready to subscribe, unlock, or tip creators.
+        Secure checkout via Stripe.
       </Text>
 
       <View style={{ flex: 1 }} />

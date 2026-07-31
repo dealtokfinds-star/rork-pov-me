@@ -416,8 +416,7 @@ struct OnboardingView: View {
 
     private func finish() {
         finishing = true
-        followed.forEach { app.toggleFollow($0) }
-        app.completeOnboarding(name: name, interests: picked, followed: followed)
+        app.completeOnboarding(name: name, interests: picked)
         finishing = false
         router.popToRoot()
         router.selectedTab = .feed

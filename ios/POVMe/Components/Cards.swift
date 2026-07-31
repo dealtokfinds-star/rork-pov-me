@@ -25,7 +25,7 @@ struct EpisodeCard: View {
 
     private var creator: Creator? { Mock.creator(episode.creatorId) }
     private var cat: Category { Category.by(episode.category) }
-    private var locked: Bool { !app.canWatch(episode) }
+    private var locked: Bool { episode.access != .free }
     private var saved: Bool { app.savedEpisodes.contains(episode.id) }
     private var liked: Bool { app.likedEpisodes.contains(episode.id) }
 
@@ -198,7 +198,7 @@ struct EpisodeTile: View {
     @Environment(Router.self) private var router
 
     private var creator: Creator? { Mock.creator(episode.creatorId) }
-    private var locked: Bool { !app.canWatch(episode) }
+    private var locked: Bool { episode.access != .free }
 
     var body: some View {
         PressableButton(scaleTo: 0.96) {

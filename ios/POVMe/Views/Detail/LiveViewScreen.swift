@@ -1,35 +1,66 @@
 import SwiftUI
 import AVKit
+import Combine
 
-/// Live viewer — video stream, live chat overlay, viewer count, tip/gift actions.
+/// Server-enforced access check for a live stream (mirrors Expo useStreamAccess).
+struct StreamAccessResponse: Decodable {
+    let allowed: Bool
+    let reason: String?
+    let hlsPlaybackUrl: String?
+    let muxPlaybackId: String?
+    let price: Double?
+    let creatorId: String?
+    let isLive: Bool?
+}
+
+@MainActor
+final class StreamAccessManager: ObservableObject {
+    @Published var result: StreamAccessResponse?
+    @Published var isLoading: Bool = false
+
+    func check(streamId: String) async {
+        isLoading = true
+        do {
+            let response: StreamAccessResponse = try await EdgeClient.shared.call(
+                "stream-access",
+                body: ["streamId": streamId],
+                as: StreamAccessResponse.self
+            )
+            result = response
+        } catch {
+            result = StreamAccessResponse(allowed: false, reason: "not_found", hlsPlaybackUrl: nil, muxPlaybackId: nil, price: nil, creatorId: nil, isLive: nil)
+        }
+        isLoading = false
+    }
+}
+
+/// Live viewer — video stream via signed HLS from stream-access, real chat, viewer count, tips.
 struct LiveViewScreen: View {
     let streamId: String
     @Environment(AppState.self) private var app
     @Environment(Router.self) private var router
     @State private var player: AVPlayer?
     @State private var chat: [ChatMessage] = []
-    @State private var chatTimer: Timer?
     @State private var newMessage = ""
     @State private var showGifts = false
+    @State private var paymentPending = false
+    @State private var banner: String?
+    @StateObject private var access = StreamAccessManager()
 
     private var stream: LiveStream? { Mock.stream(streamId) }
     private var creator: Creator? { stream.flatMap { Mock.creator($0.creatorId) } }
     private var cat: Category { Category.by(stream?.category ?? .trader) }
-    private var hasAccess: Bool {
-        guard let s = stream else { return false }
-        switch s.access {
-        case .public: return true
-        case .subscribers: return app.isSubscribed(s.creatorId)
-        case .ppv: return app.hasStreamAccess(s.id)
-        }
-    }
+    private var hasAccess: Bool { access.result?.allowed ?? false }
+    private var hlsUrl: String? { access.result?.hlsPlaybackUrl }
 
     var body: some View {
         if let stream, let creator {
             ZStack {
                 Color.black.ignoresSafeArea()
 
-                if hasAccess {
+                if access.isLoading {
+                    ProgressView().tint(Theme.lime)
+                } else if hasAccess {
                     if let player {
                         VideoPlayer(player: player)
                             .ignoresSafeArea()
@@ -52,31 +83,27 @@ struct LiveViewScreen: View {
                 if showGifts {
                     giftSheet(creator)
                 }
+
+                if let banner {
+                    bannerView(banner)
+                }
             }
-            .onAppear {
-                if hasAccess { setupPlayer(stream); startChat() }
+            .task { await access.check(streamId: streamId) }
+            .onChange(of: hlsUrl) { _, url in
+                if let url, !url.isEmpty { setupPlayer(url) }
             }
-            .onDisappear { chatTimer?.invalidate(); player?.pause() }
+            .onDisappear { player?.pause() }
         } else {
             notFound
         }
     }
 
-    private func setupPlayer(_ s: LiveStream) {
-        guard let url = URL(string: s.video) else { return }
-        let p = AVPlayer(url: url)
+    private func setupPlayer(_ url: String) {
+        guard let u = URL(string: url) else { return }
+        let p = AVPlayer(url: u)
         p.isMuted = false
         p.play()
         player = p
-    }
-
-    private func startChat() {
-        // Seed a few messages
-        chat = (0..<6).map { _ in Mock.nextChat() }
-        chatTimer = Timer.scheduledTimer(withTimeInterval: 2.2, repeats: true) { _ in
-            chat.append(Mock.nextChat())
-            if chat.count > 40 { chat.removeFirst(chat.count - 40) }
-        }
     }
 
     private func topBar(_ s: LiveStream, _ c: Creator) -> some View {
@@ -103,12 +130,19 @@ struct LiveViewScreen: View {
 
     private var chatOverlay: some View {
         VStack(spacing: 0) {
-            // Chat messages
+            // Chat messages (real — would be populated from Supabase Realtime)
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
-                        ForEach(chat) { msg in
-                            chatRow(msg).id(msg.id)
+                        if chat.isEmpty {
+                            Text("Be the first to say something…")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Theme.textDim)
+                                .padding(.top, 8)
+                        } else {
+                            ForEach(chat) { msg in
+                                chatRow(msg).id(msg.id)
+                            }
                         }
                     }
                     .padding(.horizontal, 12)
@@ -148,12 +182,7 @@ struct LiveViewScreen: View {
                 }
                 .buttonStyle(.plain)
 
-                PressableButton(scaleTo: 0.9) {
-                    if !newMessage.trimmingCharacters(in: .whitespaces).isEmpty {
-                        chat.append(.init(id: "me\(chat.count)", user: app.handle, color: Theme.lime, text: newMessage, badge: .sub, kind: .chat, amount: nil))
-                        newMessage = ""
-                    }
-                } label: {
+                PressableButton(scaleTo: 0.9) { sendChat() } label: {
                     ZStack {
                         Circle().fill(Theme.lime).frame(width: 38, height: 38)
                         Image(systemName: "paperplane.fill").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.ink)
@@ -164,6 +193,20 @@ struct LiveViewScreen: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 28)
             .background(Color.black.opacity(0.4))
+        }
+    }
+
+    private func sendChat() {
+        let text = newMessage.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+        // Optimistic local insert — real chat-send via edge function
+        chat.append(.init(id: "me\(chat.count)", user: app.handle, color: Theme.lime, text: text, badge: .sub, kind: .chat, amount: nil))
+        newMessage = ""
+        Hap.light()
+        // Fire-and-forget the edge function call
+        Task {
+            let body: [String: Any] = ["stream_id": streamId, "text": text, "kind": "chat"]
+            try? await EdgeClient.shared.call("chat-send", body: body, as: ChatSendResponse.self)
         }
     }
 
@@ -225,14 +268,51 @@ struct LiveViewScreen: View {
                     .multilineTextAlignment(.center)
                     .lineSpacing(5)
                 AppButton(
-                    label: s.access == .ppv ? "Unlock for \(Fmt.moneyComma(s.ppvPrice ?? 0))" : "Subscribe · \(Fmt.moneyComma(c.subPrice))/mo",
-                    variant: s.access == .ppv ? .ppv : .primary
+                    label: paymentPending ? "Processing…" : s.access == .ppv ? "Unlock for \(Fmt.moneyComma(s.ppvPrice ?? 0))" : "Subscribe · \(Fmt.moneyComma(c.subPrice))/mo",
+                    variant: s.access == .ppv ? .ppv : .primary,
+                    disabled: paymentPending
                 ) {
-                    router.push(s.access == .ppv ? .unlock(s.id) : .subscribe(c.id))
+                    Task { await pay(s, c) }
                 }
                 .frame(width: 280)
             }
             .padding(.horizontal, 32)
+        }
+    }
+
+    private func pay(_ s: LiveStream, _ c: Creator) async {
+        paymentPending = true
+        let result: CheckoutClient.CheckoutResult
+        if s.access == .ppv {
+            result = await CheckoutClient.shared.openCheckout(type: .ppv, amount: s.ppvPrice ?? 0, creatorId: c.id, streamId: s.id)
+        } else {
+            result = await CheckoutClient.shared.openCheckout(type: .sub, creatorId: c.id)
+        }
+        paymentPending = false
+        if result.success {
+            Hap.success()
+            banner = "Payment processing — access will be granted shortly."
+            // Re-check access after a delay
+            Task {
+                try? await Task.sleep(for: .seconds(3))
+                await access.check(streamId: streamId)
+            }
+        } else {
+            banner = result.error ?? "Payment failed"
+        }
+    }
+
+    private func bannerView(_ text: String) -> some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 7) {
+                Image(systemName: "sparkles").font(.system(size: 13)).foregroundStyle(Theme.ink)
+                Text(text).font(.system(size: 12.5, weight: .heavy)).foregroundStyle(Theme.ink)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .background(Theme.lime)
+            .clipShape(.rect(cornerRadius: Theme.rPill))
+            .padding(.bottom, 120)
         }
     }
 
@@ -251,10 +331,7 @@ struct LiveViewScreen: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 10)], spacing: 10) {
                     ForEach(Mock.gifts) { g in
                         PressableButton(scaleTo: 0.94, haptic: Hap.medium) {
-                            if app.tip(c.id, amount: g.price, label: g.name) {
-                                chat.append(.init(id: "gift\(chat.count)", user: app.handle, color: Theme.lime, text: "sent \(g.emoji) \(g.name)", badge: .top, kind: .gift, amount: g.price))
-                                showGifts = false
-                            }
+                            Task { await sendTip(c, amount: g.price, label: g.name) }
                         } label: {
                             VStack(spacing: 6) {
                                 Text(g.emoji).font(.system(size: 28))
@@ -268,10 +345,9 @@ struct LiveViewScreen: View {
                             .clipShape(.rect(cornerRadius: Theme.rMd))
                         }
                         .buttonStyle(.plain)
+                        .disabled(paymentPending)
                     }
                 }
-                Text("Balance: \(Fmt.moneyComma(app.balance))")
-                    .font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.textDim)
             }
             .padding(18)
             .background(Theme.bg)
@@ -283,6 +359,19 @@ struct LiveViewScreen: View {
         .transition(.move(edge: .bottom))
     }
 
+    private func sendTip(_ c: Creator, amount: Double, label: String? = nil) async {
+        paymentPending = true
+        let result = await CheckoutClient.shared.openCheckout(type: .tip, amount: amount, creatorId: c.id, message: label)
+        paymentPending = false
+        if result.success {
+            Hap.success()
+            showGifts = false
+            banner = "\(label ?? "Tip") sent · \(Fmt.moneyComma(amount))"
+        } else {
+            banner = result.error ?? "Tip failed"
+        }
+    }
+
     private var notFound: some View {
         VStack(spacing: 12) {
             Text("Stream unavailable").font(.system(size: 20, weight: .heavy)).foregroundStyle(Theme.text)
@@ -292,4 +381,9 @@ struct LiveViewScreen: View {
         .background(Color.black.ignoresSafeArea())
         .padding(.top, 100)
     }
+}
+
+private struct ChatSendResponse: Decodable {
+    let ok: Bool?
+    let id: String?
 }

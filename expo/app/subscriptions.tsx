@@ -8,11 +8,12 @@ import Colors, { Radius, microLabel } from "@/constants/colors";
 import { formatMoney } from "@/constants/mock-data";
 import { useCreator } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
-import type { Subscription } from "@/types";
+import type { SubInfo } from "@/hooks/useServerData";
 
 export default function SubscriptionsScreen() {
   const router = useRouter();
-  const { subscriptions, cancelSubscription, resumeSubscription, monthlySpend, balance } = useApp();
+  const { subscriptions, cancelSubscriptionViaStripe, monthlySpend, balance } = useApp();
+  const [cancelling, setCancelling] = React.useState<string | null>(null);
 
   const active = subscriptions.filter((s) => s.active);
   const cancelled = subscriptions.filter((s) => !s.active);
@@ -34,7 +35,7 @@ export default function SubscriptionsScreen() {
         </PressableScale>
       </View>
 
-      {subscriptions.length === 0 ? (
+      {subscriptions.length === 0 && !cancelling ? (
         <EmptyState
           icon={<CalendarClock size={22} color={Colors.textMid} />}
           title="No subscriptions yet"
@@ -53,7 +54,16 @@ export default function SubscriptionsScreen() {
                 key={sub.creatorId}
                 sub={sub}
                 active
-                onCancel={() => { cancelSubscription(sub.creatorId); haptic("medium"); }}
+                onCancel={async () => {
+                  setCancelling(sub.creatorId);
+                  const result = await cancelSubscriptionViaStripe(sub.creatorId);
+                  setCancelling(null);
+                  if (result.success) {
+                    haptic("medium");
+                  } else {
+                    haptic("heavy");
+                  }
+                }}
                 onTip={() => router.push(`/tip/${sub.creatorId}`)}
                 onOpen={() => router.push(`/creator/${sub.creatorId}`)}
               />
@@ -71,7 +81,7 @@ export default function SubscriptionsScreen() {
                 key={sub.creatorId}
                 sub={sub}
                 active={false}
-                onResume={() => { resumeSubscription(sub.creatorId); haptic("success"); }}
+                onResume={() => router.push(`/subscribe/${sub.creatorId}`)}
                 onOpen={() => router.push(`/creator/${sub.creatorId}`)}
               />
             ))}
@@ -95,7 +105,7 @@ function SubCard({
   onTip,
   onOpen,
 }: {
-  sub: Subscription;
+  sub: SubInfo;
   active: boolean;
   onCancel?: () => void;
   onResume?: () => void;

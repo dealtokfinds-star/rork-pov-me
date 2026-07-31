@@ -167,7 +167,7 @@ struct ProfileView: View {
                 HStack(spacing: 6) {
                     if app.isCreator { Tag(label: "Creator", color: Theme.ink, bg: Theme.lime) }
                     Tag(label: "\(app.activeSubs.count) lives subscribed", color: Theme.text, bg: Color.white.opacity(0.1))
-                    Tag(label: "\(app.unlockedEpisodes.count) POVs unlocked", color: Theme.cyan, bg: Theme.cyan.opacity(0.12))
+                    Tag(label: "\(app.savedEpisodes.count) POVs saved", color: Theme.cyan, bg: Theme.cyan.opacity(0.12))
                 }
                 .padding(.top, 14)
             }

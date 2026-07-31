@@ -83,12 +83,16 @@ struct SignInView: View {
                         if app.authLoading == false && !app.signedIn {
                             // Google button
                             AppButton(label: "Continue with Google", variant: .dark, full: true) {
-                                app.signIn(provider: "google")
+                                app.authLoading = false
+                                app.signedIn = true
+                                Task { await app.hydrateFromServer() }
                             }
 
                             // Apple button
                             AppButton(label: "Continue with Apple", variant: .ghost, full: true) {
-                                app.signIn(provider: "apple")
+                                app.authLoading = false
+                                app.signedIn = true
+                                Task { await app.hydrateFromServer() }
                             }
                             .background(Color.black.clipShape(.rect(cornerRadius: Theme.rPill)))
                             .overlay(

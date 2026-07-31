@@ -1,6 +1,28 @@
 import { createAdminClient, corsHeaders, json, requireAuth, AuthError } from "../_shared/auth.ts";
 import { sendEmailInternal } from "../send-email/index.ts";
 
+/** Insert an audit log row for every admin action. */
+async function logAudit(
+  admin: ReturnType<typeof createAdminClient>,
+  adminId: string,
+  action: string,
+  targetId: string | undefined,
+  reason?: string,
+  metadata?: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await admin.from("audit_logs").insert({
+      admin_id: adminId,
+      action,
+      target_id: targetId ?? null,
+      reason: reason ?? null,
+      metadata: metadata ?? null,
+    });
+  } catch (err) {
+    console.error("[admin-actions] audit log insert failed", err);
+  }
+}
+
 /**
  * POST /admin-actions
  * Body: { action: string, ...payload }
@@ -53,6 +75,7 @@ Deno.serve(async (req) => {
           kyc_last_reason: reason ?? "Suspended by admin",
           updated_at: now,
         }).eq("id", user_id);
+        await logAudit(admin, user.userId, "suspend_user", user_id, reason);
         return json({ ok: true, action: "suspend_user" });
       }
 
@@ -64,6 +87,7 @@ Deno.serve(async (req) => {
           kyc_last_reason: null,
           updated_at: now,
         }).eq("id", user_id);
+        await logAudit(admin, user.userId, "reinstate_user", user_id);
         return json({ ok: true, action: "reinstate_user" });
       }
 
@@ -75,6 +99,7 @@ Deno.serve(async (req) => {
           stripe_account_status: "payout_held",
           updated_at: now,
         }).eq("id", user_id);
+        await logAudit(admin, user.userId, "hold_payout", user_id, reason);
         return json({ ok: true, action: "hold_payout" });
       }
 
@@ -88,6 +113,7 @@ Deno.serve(async (req) => {
           assigned_admin_id: user.userId,
           updated_at: now,
         }).eq("id", report_id);
+        await logAudit(admin, user.userId, "resolve_report", report_id, resolution);
         return json({ ok: true, action: "resolve_report" });
       }
 
@@ -98,6 +124,7 @@ Deno.serve(async (req) => {
           assigned_admin_id: admin_id ?? user.userId,
           updated_at: now,
         }).eq("id", report_id);
+        await logAudit(admin, user.userId, "assign_report", report_id, undefined, { assigned_to: admin_id });
         return json({ ok: true, action: "assign_report" });
       }
 
@@ -105,6 +132,7 @@ Deno.serve(async (req) => {
         const { episode_id } = body as { episode_id?: string };
         if (!episode_id) return json({ error: "episode_id required" }, 400);
         await admin.from("episodes").delete().eq("id", episode_id);
+        await logAudit(admin, user.userId, "delete_episode", episode_id);
         return json({ ok: true, action: "delete_episode" });
       }
 
@@ -116,6 +144,7 @@ Deno.serve(async (req) => {
           ended_at: now,
           updated_at: now,
         }).eq("id", stream_id);
+        await logAudit(admin, user.userId, "delete_stream", stream_id);
         return json({ ok: true, action: "delete_stream" });
       }
 
@@ -125,6 +154,7 @@ Deno.serve(async (req) => {
         // Toggle likes column as a proxy for "featured" — or add a real column later.
         // For now, bump likes to surface it.
         await admin.from("episodes").update({ posted_at: now }).eq("id", episode_id);
+        await logAudit(admin, user.userId, "feature_episode", episode_id);
         return json({ ok: true, action: "feature_episode" });
       }
 
@@ -135,6 +165,7 @@ Deno.serve(async (req) => {
           is_admin: Boolean(is_admin),
           updated_at: now,
         }).eq("id", user_id);
+        await logAudit(admin, user.userId, "set_admin", user_id, undefined, { is_admin: Boolean(is_admin) });
         return json({ ok: true, action: "set_admin" });
       }
 
@@ -165,6 +196,7 @@ Deno.serve(async (req) => {
         } catch (err) {
           console.log("[admin-actions] approve email skipped", err);
         }
+        await logAudit(admin, user.userId, "approve_creator", user_id);
         return json({ ok: true, action: "approve_creator" });
       }
 
@@ -194,6 +226,7 @@ Deno.serve(async (req) => {
         } catch (err) {
           console.log("[admin-actions] reject email skipped", err);
         }
+        await logAudit(admin, user.userId, "reject_creator", user_id, rejectReason);
         return json({ ok: true, action: "reject_creator" });
       }
 
@@ -215,6 +248,7 @@ Deno.serve(async (req) => {
           last_payout_at: now,
           updated_at: now,
         }).eq("id", payout.creator_id);
+        await logAudit(admin, user.userId, "fulfill_payout", payout_id, undefined, { amount: payout.amount });
         return json({ ok: true, action: "fulfill_payout" });
       }
 

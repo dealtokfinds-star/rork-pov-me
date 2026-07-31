@@ -1,12 +1,11 @@
 import SwiftUI
 
-/// Wallet modal — balance, top-up, payment methods, transaction history.
+/// Wallet modal — balance, top-up via Stripe, transaction history from Supabase.
 struct WalletView: View {
     @Environment(AppState.self) private var app
     @Environment(Router.self) private var router
-    @State private var showTopUp = false
-    @State private var topUpAmount: Double = 20
-    @State private var processing = false
+    @State private var processing: Double?
+    @State private var payError: String?
 
     private let topUpOptions: [Double] = [10, 20, 50, 100, 250]
 
@@ -15,16 +14,20 @@ struct WalletView: View {
             VStack(spacing: 0) {
                 balanceCard
                 statsRow
-                SectionHeader(kicker: "Add funds", title: "Top up wallet")
+                SectionHeader(kicker: "Stripe Checkout", title: "Add funds")
+                if let payError {
+                    errorBanner
+                }
                 topUpGrid
                 SectionHeader(kicker: "Activity", title: "Transactions")
-                transactionsList
+                transactionsPlaceholder
             }
             .padding(.bottom, 40)
         }
         .background(Theme.bg.ignoresSafeArea())
         .navigationTitle("Wallet")
         .navigationBarTitleDisplayMode(.inline)
+        .task { await app.refreshWallet() }
     }
 
     private var balanceCard: some View {
@@ -63,10 +66,24 @@ struct WalletView: View {
     private var statsRow: some View {
         HStack(spacing: 10) {
             StatTile(label: "Subscriptions", value: "\(app.activeSubs.count)", sub: "active", accent: Theme.lime)
-            StatTile(label: "Unlocked", value: "\(app.unlockedEpisodes.count)", sub: "POV episodes", accent: Theme.cyan)
+            StatTile(label: "Saved", value: "\(app.savedEpisodes.count)", sub: "POV episodes", accent: Theme.cyan)
         }
         .padding(.horizontal, 18)
         .padding(.top, 10)
+    }
+
+    private var errorBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 14)).foregroundStyle(Theme.danger)
+            Text(payError!).font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.danger)
+            Spacer()
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Theme.danger.opacity(0.1))
+        .overlay(RoundedRectangle(cornerRadius: Theme.rMd).stroke(Theme.danger.opacity(0.3), lineWidth: 1))
+        .clipShape(.rect(cornerRadius: Theme.rMd))
+        .padding(.horizontal, 18)
+        .padding(.bottom, 8)
     }
 
     private var topUpGrid: some View {
@@ -74,13 +91,17 @@ struct WalletView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 10)], spacing: 10) {
                 ForEach(topUpOptions, id: \.self) { amt in
                     PressableButton(scaleTo: 0.94, haptic: Hap.medium) {
-                        processTopUp(amt)
+                        Task { await processTopUp(amt) }
                     } label: {
                         VStack(spacing: 4) {
-                            Text("+\(Fmt.moneyComma(amt))")
-                                .font(.system(size: 17, weight: .heavy))
-                                .foregroundStyle(Theme.lime)
-                            Text(processing && topUpAmount == amt ? "Processing…" : "Add to wallet")
+                            if processing == amt {
+                                ProgressView().tint(Theme.lime)
+                            } else {
+                                Text("+\(Fmt.moneyComma(amt))")
+                                    .font(.system(size: 17, weight: .heavy))
+                                    .foregroundStyle(Theme.lime)
+                            }
+                            Text("Add to wallet")
                                 .font(.system(size: 10, weight: .bold))
                                 .foregroundStyle(Theme.textDim)
                         }
@@ -91,10 +112,10 @@ struct WalletView: View {
                         .clipShape(.rect(cornerRadius: Theme.rMd))
                     }
                     .buttonStyle(.plain)
-                    .disabled(processing)
+                    .disabled(processing != nil)
                 }
             }
-            Text("Demo mode — funds added instantly. Real payments use Stripe Checkout in the Expo app.")
+            Text("Secure checkout via Stripe. Your wallet updates once payment is confirmed.")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Theme.textDim)
                 .multilineTextAlignment(.center)
@@ -104,87 +125,29 @@ struct WalletView: View {
         .padding(.horizontal, 18)
     }
 
-    private var transactionsList: some View {
-        VStack(spacing: 0) {
-            if app.transactions.isEmpty {
-                EmptyState(
-                    title: "No transactions yet",
-                    message: "Your subscriptions, unlocks, tips, and top-ups will show here.",
-                    iconName: "doc.text.magnifyingglass"
-                )
-            } else {
-                ForEach(Array(app.transactions.enumerated()), id: \.element.id) { idx, tx in
-                    transactionRow(tx)
-                    if idx < app.transactions.count - 1 {
-                        AppDivider().padding(.leading, 58)
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 18)
-        .background(Theme.surface)
-        .overlay(RoundedRectangle(cornerRadius: Theme.rMd).stroke(Theme.border, lineWidth: 1))
-        .clipShape(.rect(cornerRadius: Theme.rMd))
+    private var transactionsPlaceholder: some View {
+        EmptyState(
+            title: "No transactions yet",
+            message: "Your subscriptions, unlocks, tips, and top-ups will show here once you make your first payment.",
+            iconName: "doc.text.magnifyingglass"
+        )
         .padding(.horizontal, 18)
     }
 
-    private func transactionRow(_ tx: Transaction) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle().fill(Theme.surfaceHi).frame(width: 38, height: 38)
-                Image(systemName: txIcon(tx.kind))
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(txColor(tx.kind))
+    private func processTopUp(_ amount: Double) async {
+        payError = nil
+        processing = amount
+        let result = await CheckoutClient.shared.openCheckout(type: .topup, amount: amount)
+        processing = nil
+        if result.success {
+            Hap.success()
+            // Refresh wallet after a delay to let the webhook process
+            Task {
+                try? await Task.sleep(for: .seconds(3))
+                await app.refreshWallet()
             }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(tx.label)
-                    .font(.system(size: 13.5, weight: .heavy))
-                    .foregroundStyle(Theme.text)
-                    .lineLimit(1)
-                Text(tx.at.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.textDim)
-            }
-            Spacer()
-            Text(txAmountText(tx))
-                .font(.system(size: 14, weight: .heavy))
-                .foregroundStyle(tx.kind == .topup || tx.kind == .payout ? Theme.lime : Theme.text)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-    }
-
-    private func txIcon(_ kind: Transaction.TxKind) -> String {
-        switch kind {
-        case .sub: return "person.2.fill"
-        case .tip, .gift: return "sparkles"
-        case .ppv: return "lock.fill"
-        case .topup: return "plus.circle.fill"
-        case .payout: return "banknote.fill"
-        }
-    }
-
-    private func txColor(_ kind: Transaction.TxKind) -> Color {
-        switch kind {
-        case .sub: return Theme.lime
-        case .tip, .gift: return Theme.gold
-        case .ppv: return Theme.cyan
-        case .topup: return Theme.lime
-        case .payout: return Theme.success
-        }
-    }
-
-    private func txAmountText(_ tx: Transaction) -> String {
-        let prefix = tx.kind == .topup || tx.kind == .payout ? "+" : "-"
-        return "\(prefix)\(Fmt.moneyComma(tx.amount))"
-    }
-
-    private func processTopUp(_ amount: Double) {
-        processing = true
-        topUpAmount = amount
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            app.topUp(amount)
-            processing = false
+        } else {
+            payError = result.error ?? "Payment failed. Please try again."
         }
     }
 }

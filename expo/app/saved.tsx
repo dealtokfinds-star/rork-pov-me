@@ -13,23 +13,17 @@ type Filter = "saved" | "unlocked" | "liked";
 
 export default function SavedScreen() {
   const router = useRouter();
-  const { savedEpisodes, unlockedEpisodes, likedEpisodes } = useApp();
+  const { savedEpisodes, likedEpisodes } = useApp();
   const [filter, setFilter] = useState<Filter>("saved");
   const { data: allEpisodes = [] } = useEpisodes();
 
-  const ids = filter === "saved" ? savedEpisodes : filter === "unlocked" ? unlockedEpisodes : likedEpisodes;
+  const ids = filter === "saved" ? savedEpisodes : likedEpisodes;
   const list = useMemo(() => allEpisodes.filter((e) => ids.includes(e.id)), [ids, allEpisodes]);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
       <View style={styles.filterRow}>
         <Chip label={`Saved ${savedEpisodes.length}`} active={filter === "saved"} onPress={() => setFilter("saved")} />
-        <Chip
-          label={`Unlocked ${unlockedEpisodes.length}`}
-          accent={Colors.cyan}
-          active={filter === "unlocked"}
-          onPress={() => setFilter("unlocked")}
-        />
         <Chip
           label={`Liked ${likedEpisodes.length}`}
           accent={Colors.magenta}

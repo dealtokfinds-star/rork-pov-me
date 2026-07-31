@@ -52,7 +52,7 @@ const TIERS: Tier[] = [
 export default function SubscribeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { subscribe, subscribeViaStripe, balance, isSubscribed } = useApp();
+  const { subscribeViaStripe, balance, isSubscribed } = useApp();
   const [tierId, setTierId] = useState<string>("basic");
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<boolean>(false);
@@ -83,30 +83,15 @@ export default function SubscribeScreen() {
     setProcessing(true);
     setError(null);
     try {
-      // Try real Stripe subscription first
       const result = await subscribeViaStripe(creator.id, price);
       if (result.success) {
         setDone(true);
         haptic("success");
-        return;
-      }
-      // Fallback to wallet-based mock if Stripe fails
-      const ok = subscribe(creator.id, price);
-      if (!ok) {
-        setError(result.error ?? `Your wallet has ${formatMoney(balance)}. Add funds to subscribe.`);
-        return;
-      }
-      setDone(true);
-      haptic("success");
-    } catch (err) {
-      // Fallback to wallet-based mock
-      const ok = subscribe(creator.id, price);
-      if (!ok) {
-        setError(err instanceof Error ? err.message : "Subscription failed");
       } else {
-        setDone(true);
-        haptic("success");
+        setError(result.error ?? "Checkout was cancelled or failed.");
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Subscription failed");
     } finally {
       setProcessing(false);
     }

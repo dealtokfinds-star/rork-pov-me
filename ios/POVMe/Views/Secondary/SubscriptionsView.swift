@@ -1,9 +1,12 @@
 import SwiftUI
 
 /// Subscriptions screen — manage active/paused creator subscriptions.
+/// Cancellation goes through the cancel-subscription edge function (Stripe).
 struct SubscriptionsView: View {
     @Environment(AppState.self) private var app
     @Environment(Router.self) private var router
+    @State private var cancelling: String?
+    @State private var cancelError: String?
 
     var body: some View {
         ScrollView {
@@ -84,8 +87,10 @@ struct SubscriptionsView: View {
                     .clipShape(.rect(cornerRadius: Theme.rPill))
             }
             .buttonStyle(.plain)
-            PressableButton(scaleTo: 0.94, haptic: Hap.medium) { app.cancelSubscription(c.id) } label: {
-                Text("Cancel")
+            PressableButton(scaleTo: 0.94, haptic: Hap.medium) {
+                Task { await cancelSub(c.id) }
+            } label: {
+                Text(cancelling == c.id ? "Cancelling…" : "Cancel")
                     .font(.system(size: 12, weight: .heavy)).foregroundStyle(Theme.danger)
                     .padding(.horizontal, 14).frame(height: 34)
                     .background(Theme.danger.opacity(0.08))
@@ -93,11 +98,25 @@ struct SubscriptionsView: View {
                     .clipShape(.rect(cornerRadius: Theme.rPill))
             }
             .buttonStyle(.plain)
+            .disabled(cancelling != nil)
         }
         .padding(14)
         .background(Theme.surface)
         .overlay(RoundedRectangle(cornerRadius: Theme.rMd).stroke(Theme.border, lineWidth: 1))
         .clipShape(.rect(cornerRadius: Theme.rMd))
+    }
+
+    private func cancelSub(_ creatorId: String) async {
+        cancelling = creatorId
+        cancelError = nil
+        let result = await CheckoutClient.shared.cancelSubscription(creatorId: creatorId)
+        cancelling = nil
+        if !result.success {
+            cancelError = result.error ?? "Cancel failed"
+            Hap.heavy()
+        } else {
+            Hap.medium()
+        }
     }
 
     private var billingCard: some View {

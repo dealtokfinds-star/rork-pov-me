@@ -72,7 +72,7 @@ struct SettingsView: View {
                 }
             }
             AppButton(label: "Save profile") {
-                app.completeOnboarding(name: name, interests: app.interests, followed: app.followedCreators)
+                app.completeOnboarding(name: name, interests: app.interests)
                 saved = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { saved = false }
             }

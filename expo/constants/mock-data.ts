@@ -1,7 +1,6 @@
 import Colors from "@/constants/colors";
 import type {
   Category,
-  ChatMessage,
   Gift,
   PovCategory,
 } from "@/types";
@@ -9,15 +8,13 @@ import type {
 /**
  * Static reference data and UI utilities.
  *
- * NOTE: This file used to ship hardcoded mock creators, episodes, streams,
- * studio episodes, and DM threads. Those have been removed — every screen
- * now reads real data from Supabase via the hooks in `lib/data.ts`.
- *
- * What remains is genuinely static app data:
+ * This file holds genuinely static app data only:
  *  - CATEGORIES (the fixed POV lifestyle taxonomy)
  *  - GIFTS (the fixed tip-gift catalog)
- *  - Chat simulation helpers (used by the live chat overlay)
+ *  - CHAT_COLORS (username color palette for live chat)
  *  - Formatting utilities (formatCount / formatMoney / formatDuration)
+ *
+ * All creator, episode, stream, wallet, and chat data comes from Supabase.
  */
 
 export const CATEGORIES: Category[] = [
@@ -40,38 +37,6 @@ export const GIFTS: Gift[] = [
   { id: "g6", name: "Crown", emoji: "👑", price: 99.99 },
 ];
 
-const CHAT_NAMES = [
-  "zaydraws",
-  "kilo_9",
-  "mari.fps",
-  "tapedelay",
-  "nine_lives",
-  "oscarr",
-  "vibecheck",
-  "hexed",
-  "lunaa",
-  "grindset_ty",
-  "porschekid",
-  "bankrolljay",
-];
-
-const CHAT_LINES = [
-  "this angle is insane",
-  "bro the hands are shaking 😭",
-  "how much are you risking rn",
-  "watching from Lagos 🇳🇬",
-  "chest rig audio is so clean",
-  "I feel like I'm in the car",
-  "day 14 of asking for a gym chapter",
-  "explain the entry pls",
-  "the ambience >>>",
-  "third stream I've caught today",
-  "this is better than tv fr",
-  "sub renewed, worth every cent",
-  "put the cam lower next time",
-  "mans is built different",
-];
-
 export const CHAT_COLORS = [
   Colors.lime,
   Colors.cyan,
@@ -80,45 +45,6 @@ export const CHAT_COLORS = [
   "#9F8BFF",
   "#7DFFB2",
 ];
-
-let chatSeed = 1;
-
-/** Generates a pseudo-random chat message for the simulated live chat. */
-export function randomChat(): ChatMessage {
-  chatSeed += 1;
-  const roll = (chatSeed * 37) % 100;
-  const name = CHAT_NAMES[(chatSeed * 7) % CHAT_NAMES.length];
-  const color = CHAT_COLORS[(chatSeed * 3) % CHAT_COLORS.length];
-  if (roll > 88) {
-    const amount = [2, 5, 10, 20, 50][(chatSeed * 5) % 5];
-    return {
-      id: `m${chatSeed}`,
-      user: name,
-      color,
-      text: "keep going 🔥",
-      kind: "tip",
-      amount,
-      badge: "top",
-    };
-  }
-  if (roll > 82) {
-    return {
-      id: `m${chatSeed}`,
-      user: name,
-      color,
-      text: "joined the POV",
-      kind: "join",
-    };
-  }
-  return {
-    id: `m${chatSeed}`,
-    user: name,
-    color,
-    text: CHAT_LINES[(chatSeed * 11) % CHAT_LINES.length],
-    kind: "chat",
-    badge: roll > 55 ? "sub" : undefined,
-  };
-}
 
 export function categoryById(id: PovCategory): Category {
   return CATEGORIES.find((c) => c.id === id) ?? CATEGORIES[0];

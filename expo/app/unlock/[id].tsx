@@ -18,9 +18,10 @@ import { useApp } from "@/providers/app-provider";
 export default function UnlockScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { unlockEpisode, unlockViaStripe, balance, hasUnlocked } = useApp();
+  const { unlockViaStripe, balance } = useApp();
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<boolean>(false);
+  const [done, setDone] = useState<boolean>(false);
 
   const { data: episode, isLoading } = useEpisode(id);
   const { data: creator } = useCreator(episode?.creatorId);
@@ -41,20 +42,19 @@ export default function UnlockScreen() {
   }
 
   const price = episode.ppvPrice ?? 0;
-  const unlocked = hasUnlocked(episode.id);
   const cat = categoryById(episode.category);
 
-  if (unlocked) {
+  if (done) {
     return (
       <View style={[styles.screen, styles.successWrap]}>
         <View style={styles.successIcon}>
-          <Play size={26} color={Colors.ink} fill={Colors.ink} />
+          <Check size={26} color={Colors.ink} />
         </View>
-        <Text style={styles.successTitle}>Unlocked forever.</Text>
+        <Text style={styles.successTitle}>Payment processing</Text>
         <Text style={styles.successBody}>
-          {episode.title} is now in your library. Rewatch it any time, subscription or not.
+          Your unlock is being confirmed. You'll be able to watch {episode.title} once the payment clears.
         </Text>
-        <Button label="Watch now" onPress={() => router.back()} style={{ marginTop: 24 }} />
+        <Button label="Back to episode" onPress={() => router.back()} style={{ marginTop: 24 }} />
       </View>
     );
   }
@@ -124,25 +124,12 @@ export default function UnlockScreen() {
               const result = await unlockViaStripe(episode.id, price, creator.id);
               if (result.success) {
                 haptic("success");
-                router.back();
-                return;
-              }
-              // Fallback to wallet-based mock
-              const ok = unlockEpisode(episode.id, price);
-              if (!ok) {
-                setError(result.error ?? `You have ${formatMoney(balance)}. Add funds to unlock.`);
+                setDone(true);
               } else {
-                haptic("success");
-                router.back();
+                setError(result.error ?? "Checkout was cancelled or failed.");
               }
             } catch (err) {
-              const ok = unlockEpisode(episode.id, price);
-              if (!ok) {
-                setError(err instanceof Error ? err.message : "Unlock failed");
-              } else {
-                haptic("success");
-                router.back();
-              }
+              setError(err instanceof Error ? err.message : "Unlock failed");
             } finally {
               setProcessing(false);
             }

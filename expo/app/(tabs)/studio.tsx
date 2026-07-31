@@ -33,22 +33,14 @@ type Filter = "all" | "published" | "scheduled" | "draft";
 export default function StudioScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { isCreator, studio: localStudio, creatorStats, creatorPrice, deleteStudioEpisode, displayName } = useApp();
+  const { isCreator, creatorStats, creatorPrice, deleteStudioEpisode, displayName, kycStatus } = useApp();
+  const isVerified = kycStatus === "verified";
   const { user } = useAuth();
   const { data: dbEpisodes } = useStudioEpisodes(user?.id ?? null);
   const [filter, setFilter] = useState<Filter>("all");
 
-  // Merge real DB episodes with any optimistic local entries. DB wins on id
-  // collision so a just-published episode shows its real status/thumbnail.
-  const studio = useMemo<StudioEpisode[]>(() => {
-    if (!dbEpisodes || dbEpisodes.length === 0) return localStudio;
-    const localById = new Map(localStudio.map((e) => [e.id, e]));
-    const merged: StudioEpisode[] = [...dbEpisodes];
-    for (const [id, ep] of localById) {
-      if (!dbEpisodes.some((d) => d.id === id)) merged.push(ep);
-    }
-    return merged;
-  }, [dbEpisodes, localStudio]);
+  // Use real DB episodes only — no local mock fallback.
+  const studio = useMemo<StudioEpisode[]>(() => dbEpisodes ?? [], [dbEpisodes]);
 
   const list = useMemo<StudioEpisode[]>(
     () => (filter === "all" ? studio : studio.filter((e) => e.status === filter)),
@@ -133,12 +125,28 @@ export default function StudioScreen() {
           <Text style={styles.kicker}>Creator studio</Text>
           <Text style={styles.title}>@{displayName.toLowerCase()}</Text>
         </View>
-        <PressableScale onPress={() => router.push("/upload")} scaleTo={0.93}>
-          <View style={styles.plusBtn}>
+        <PressableScale onPress={() => router.push("/upload")} scaleTo={0.93} disabled={!isVerified}>
+          <View style={[styles.plusBtn, !isVerified && { opacity: 0.4 }]}>
             <Plus size={20} color={Colors.ink} />
           </View>
         </PressableScale>
       </View>
+
+      {!isVerified ? (
+        <PressableScale onPress={() => router.push("/become-creator")} scaleTo={0.98} style={styles.verifyBanner}>
+          <Shield size={16} color={Colors.lime} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.verifyBannerTitle}>Identity verification required</Text>
+            <Text style={styles.verifyBannerBody}>
+              {kycStatus === "pending"
+                ? "Under review — we'll notify you when approved."
+                : kycStatus === "rejected"
+                  ? "Rejected — tap to resubmit your documents."
+                  : "Verify your identity to publish, go live, and receive payouts."}
+            </Text>
+          </View>
+        </PressableScale>
+      ) : null}
 
       <View style={styles.balanceCard}>
         <LinearGradient
@@ -148,12 +156,12 @@ export default function StudioScreen() {
           style={StyleSheet.absoluteFill}
         />
         <Text style={styles.balanceLabel}>Available to withdraw</Text>
-        <Text style={styles.balanceValue}>{formatMoney(creatorStats.net)}</Text>
+        <Text style={styles.balanceValue}>{formatMoney(creatorStats.netRevenue)}</Text>
         <View style={styles.balanceMeta}>
           <View style={styles.rowGap4}>
             <TrendingUp size={12} color={Colors.lime} />
             <Text style={styles.balanceMetaText}>
-              {formatMoney(creatorStats.gross)} gross · 80% share
+              {formatMoney(creatorStats.grossRevenue)} gross · 80% share
             </Text>
           </View>
         </View>
@@ -170,7 +178,7 @@ export default function StudioScreen() {
       </View>
 
       <View style={styles.statRow}>
-        <StatTile label="Subscribers" value={formatCount(creatorStats.subs)} sub="+42 this week" />
+        <StatTile label="Subscribers" value={formatCount(creatorStats.subscriberCount)} sub="+42 this week" />
         <StatTile
           label="PPV unlocks"
           value={`${creatorStats.ppvUnlocks}`}
@@ -181,7 +189,7 @@ export default function StudioScreen() {
       <View style={styles.statRow}>
         <StatTile
           label="Tips"
-          value={formatMoney(creatorStats.tips)}
+          value={formatMoney(creatorStats.totalTips)}
           sub="this month"
           accent={Colors.gold}
         />
@@ -463,4 +471,18 @@ const styles = StyleSheet.create({
     borderColor: "rgba(53,231,255,0.2)",
   },
   guideText: { color: Colors.text, fontSize: 13, fontWeight: "700" },
+  verifyBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginHorizontal: 18,
+    marginTop: 10,
+    padding: 14,
+    borderRadius: Radius.md,
+    backgroundColor: "rgba(204,255,0,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(204,255,0,0.25)",
+  },
+  verifyBannerTitle: { color: Colors.text, fontSize: 13.5, fontWeight: "800" },
+  verifyBannerBody: { color: Colors.textMid, fontSize: 12, fontWeight: "600", marginTop: 3, lineHeight: 17 },
 });

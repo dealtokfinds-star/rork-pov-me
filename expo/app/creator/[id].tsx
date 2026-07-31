@@ -32,7 +32,7 @@ export default function CreatorScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { isSubscribed, tipTotals } = useApp();
+  const { isSubscribed } = useApp();
   const [tab, setTab] = useState<Tab>("episodes");
 
   const { data: creator, isLoading } = useCreator(id ?? "");
@@ -61,7 +61,6 @@ export default function CreatorScreen() {
   }
 
   const subbed = isSubscribed(creator.id);
-  const tipped = tipTotals[creator.id] ?? 0;
   const premium = episodes.filter((e) => e.access === "ppv");
   const free = episodes.filter((e) => e.access === "free");
 
@@ -131,7 +130,6 @@ export default function CreatorScreen() {
                 <Text style={styles.subbedKicker}>You are living this life</Text>
                 <Text style={styles.subbedText}>
                   Full feed unlocked · {formatMoney(creator.subPrice)}/mo
-                  {tipped > 0 ? ` · ${formatMoney(tipped)} tipped` : ""}
                 </Text>
               </View>
               <PressableScale onPress={() => router.push("/messages")} scaleTo={0.9}>

@@ -18,7 +18,8 @@ const BREAKDOWN = [
 ];
 
 export default function EarningsScreen() {
-  const { creatorStats } = useApp();
+  const { creatorStats, kycStatus } = useApp();
+  const isVerified = kycStatus === "verified";
   const [requested, setRequested] = useState<boolean>(false);
   const [payoutError, setPayoutError] = useState<string | null>(null);
   const [withdrawing, setWithdrawing] = useState<boolean>(false);
@@ -32,7 +33,7 @@ export default function EarningsScreen() {
 
   const available = balance?.available ?? 0;
   const pending = balance?.pending ?? 0;
-  const lifetime = balance?.lifetime_earnings ?? creatorStats.gross;
+  const lifetime = balance?.lifetime_earnings ?? creatorStats.grossRevenue;
   const payoutsEnabled = balance?.payouts_enabled ?? false;
   const payouts = balance?.payouts ?? [];
   const payoutMethodLabel = balance?.payout_method_label ?? null;
@@ -50,6 +51,7 @@ export default function EarningsScreen() {
     : <Landmark size={18} color={Colors.success} />;
 
   const handleWithdraw = async (): Promise<void> => {
+    if (!isVerified) return;
     setWithdrawing(true);
     setPayoutError(null);
     try {
@@ -92,6 +94,12 @@ export default function EarningsScreen() {
             <Clock size={14} color={Colors.gold} />
             <Text style={styles.pendingText}>
               Payout requested — arrives in 1–2 business days
+            </Text>
+          </View>
+        ) : !isVerified ? (
+          <View style={styles.disabledBox}>
+            <Text style={styles.disabledText}>
+              Verify your identity to withdraw earnings. Complete verification in Become a Creator.
             </Text>
           </View>
         ) : payoutsEnabled ? (

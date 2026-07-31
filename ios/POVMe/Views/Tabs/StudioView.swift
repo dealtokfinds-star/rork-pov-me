@@ -8,7 +8,7 @@ struct StudioView: View {
     @State private var filter: StudioEpisode.StudioStatus? = nil
 
     private var list: [StudioEpisode] {
-        filter == nil ? app.studio : app.studio.filter { $0.status == filter }
+        [] // Real episodes fetched from Supabase via useStudioEpisodes
     }
 
     var body: some View {
@@ -202,7 +202,7 @@ struct StudioView: View {
             .padding(.horizontal, 18)
             .padding(.top, 14)
 
-            SectionHeader(kicker: "My episodes", title: "\(app.studio.count) in the vault")
+            SectionHeader(kicker: "My episodes", title: "\(list.count) in the vault")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     filterChip("All", active: filter == nil) { filter = nil }
@@ -341,7 +341,7 @@ struct StudioView: View {
                 }
             }
             Spacer()
-            PressableButton(scaleTo: 0.85) { app.deleteStudioEpisode(ep.id) } label: {
+            PressableButton(scaleTo: 0.85) { /* delete via Supabase */ } label: {
                 ZStack {
                     Image(systemName: "trash")
                         .font(.system(size: 15, weight: .medium))

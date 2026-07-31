@@ -155,11 +155,7 @@ struct MessageThreadView: View {
                 .foregroundStyle(Theme.textDim)
                 .lineSpacing(4)
             AppButton(label: "Unlock for \(Fmt.moneyComma(msg.price ?? 0))", variant: .ppv, full: false, small: true) {
-                if app.charge(msg.price ?? 0) {
-                    if let idx = messages.firstIndex(where: { $0.id == msg.id }) {
-                        messages[idx] = DmMessage(id: msg.id, fromMe: msg.fromMe, text: msg.text, at: msg.at, locked: false, price: nil)
-                    }
-                }
+                Task { await unlockMessage(msg) }
             }
             .frame(width: 180)
         }
@@ -167,6 +163,16 @@ struct MessageThreadView: View {
     .background(Theme.cyan.opacity(0.08))
     .overlay(RoundedRectangle(cornerRadius: Theme.rMd).stroke(Theme.cyan.opacity(0.25), lineWidth: 1))
     .clipShape(.rect(cornerRadius: Theme.rMd))
+    }
+
+    private func unlockMessage(_ msg: DmMessage) async {
+        let result = await CheckoutClient.shared.openCheckout(type: .ppv, amount: msg.price ?? 0)
+        if result.success {
+            if let idx = messages.firstIndex(where: { $0.id == msg.id }) {
+                messages[idx] = DmMessage(id: msg.id, fromMe: msg.fromMe, text: msg.text, at: msg.at, locked: false, price: nil)
+            }
+            Hap.success()
+        }
     }
 
     private func inputBar(_ c: Creator) -> some View {

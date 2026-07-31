@@ -46,6 +46,8 @@ struct GoLiveView: View {
             VStack(spacing: 0) {
                 if live {
                     liveView
+                } else if !app.isVerified {
+                    kycGate
                 } else {
                     setupForm
                 }
@@ -65,6 +67,47 @@ struct GoLiveView: View {
         .task {
             // Start health polling when live
         }
+    }
+
+    // MARK: - KYC Gate
+
+    private var kycGate: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            ZStack {
+                Circle()
+                    .fill(Theme.lime.opacity(0.12))
+                    .frame(width: 66, height: 66)
+                    .overlay(Circle().stroke(Theme.lime.opacity(0.3), lineWidth: 1.5))
+                Image(systemName: "checkmark.shield.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(Theme.lime)
+            }
+            Text("Verify your identity to go live")
+                .font(.system(size: 22, weight: .heavy))
+                .tracking(-0.8)
+                .foregroundStyle(Theme.text)
+                .multilineTextAlignment(.center)
+            Text(app.kycStatus == "pending"
+                 ? "Your verification is under review. You'll be able to go live once it's approved."
+                 : app.kycStatus == "rejected"
+                     ? "Your verification was rejected. Please resubmit from the creator setup."
+                     : "Complete identity verification to start broadcasting live POV streams.")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Theme.textMid)
+                .multilineTextAlignment(.center)
+                .lineSpacing(5)
+            AppButton(label: app.kycStatus == "pending" ? "View status" : "Go to verification") {
+                router.push(.becomeCreator)
+            }
+            .frame(width: 240)
+            .padding(.top, 8)
+            AppButton(label: "Back", variant: .ghost, full: false) { router.pop() }
+                .frame(width: 120)
+            Spacer()
+        }
+        .padding(.horizontal, 30)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Setup form
