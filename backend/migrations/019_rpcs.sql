@@ -2,14 +2,16 @@
 -- Stored procedures / RPCs.
 
 -- user_id(): returns the authenticated user's id from the JWT
+-- Return type is text because profiles.id is text (Rork Auth user IDs are strings)
+-- Already exists in the live DB with correct text return type; create or replace is safe.
 create or replace function public.user_id()
-returns uuid
+returns text
 language sql
 stable
 as $$
-  coalesce(
-    nullif(current_setting('request.jwt.claim.sub', true), '')::uuid,
-    nullif(current_setting('request.jwt.claims', true)::json->>'sub', '')::uuid
+  select coalesce(
+    nullif(current_setting('request.jwt.claim.sub', true), ''),
+    nullif(current_setting('request.jwt.claims', true)::json->>'sub', '')
   )
 $$;
 

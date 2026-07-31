@@ -2,6 +2,7 @@
 -- Database views for aggregated reads.
 
 -- active_streams: live streams that are currently broadcasting (secrets excluded)
+drop view if exists public.active_streams cascade;
 create or replace view public.active_streams as
 select
   id, creator_id, title, thumb_url, category, access, ppv_price,
@@ -15,6 +16,7 @@ from public.live_streams
 where is_live = true;
 
 -- creator_stats: per-creator aggregate metrics
+drop view if exists public.creator_stats cascade;
 create or replace view public.creator_stats as
 select
   p.id as creator_id,
@@ -47,6 +49,7 @@ left join (
 where p.is_creator = true;
 
 -- episode_performance: per-episode aggregate metrics
+drop view if exists public.episode_performance cascade;
 create or replace view public.episode_performance as
 select
   e.id as episode_id,
@@ -58,6 +61,7 @@ select
 from public.episodes e;
 
 -- creator_revenue_daily: daily revenue breakdown per creator
+drop view if exists public.creator_revenue_daily cascade;
 create or replace view public.creator_revenue_daily as
 select
   creator_id,
@@ -72,6 +76,7 @@ group by creator_id, day
 order by day desc;
 
 -- platform_revenue: daily platform-wide revenue
+drop view if exists public.platform_revenue cascade;
 create or replace view public.platform_revenue as
 select
   date_trunc('day', created_at)::date as day,
