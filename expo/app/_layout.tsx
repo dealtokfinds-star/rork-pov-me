@@ -29,7 +29,8 @@ function useProfileSync() {
 
   useEffect(() => {
     if (!user) return;
-    const sync = async (): Promise<void> => {
+    let cancelled = false;
+    const sync = async (attempt = 0): Promise<void> => {
       const { error } = await supabase.from("profiles").upsert(
         {
           id: user.id,
@@ -39,13 +40,23 @@ function useProfileSync() {
         },
         { onConflict: "id" },
       );
+      if (cancelled) return;
       if (error) {
+        // PostgREST rejects JWTs whose `iat` is ahead of the server clock
+        // ("JWT issued at future") — common in cloud preview environments
+        // with clock skew. Retry once after a short delay so real time catches
+        // up to the token's issued-at claim.
+        if (attempt < 3 && /future|exp claim|iat/i.test(error.message)) {
+          setTimeout(() => { if (!cancelled) void sync(attempt + 1); }, 2000 << attempt);
+          return;
+        }
         console.error("[povme] profile sync failed:", error.message);
       } else {
         void queryClient.invalidateQueries({ queryKey: ["creator", user.id] });
       }
     };
     void sync();
+    return () => { cancelled = true; };
   }, [user, queryClient]);
 }
 
