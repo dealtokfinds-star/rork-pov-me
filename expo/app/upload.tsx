@@ -11,6 +11,7 @@ import {
   Film,
   Lock,
   Loader,
+  Radio,
   Unlock,
   UploadCloud,
   Users,
@@ -268,6 +269,7 @@ export default function UploadScreen() {
         onRecord={recordVideo}
         onRetry={retryUpload}
         onClear={clearVideo}
+        onGoLive={() => router.push("/golive")}
       />
 
       {/* ---- Metadata (always editable) ---- */}
@@ -436,6 +438,7 @@ function UploadZone({
   onRecord,
   onRetry,
   onClear,
+  onGoLive,
 }: {
   phase: Phase;
   progress: number;
@@ -445,6 +448,7 @@ function UploadZone({
   onRecord: () => void;
   onRetry: () => void;
   onClear: () => void;
+  onGoLive: () => void;
 }) {
   if (phase === "error") {
     return (
@@ -528,6 +532,19 @@ function UploadZone({
           </View>
         </PressableScale>
       </View>
+
+      {/* ---- Go live instead ---- */}
+      <View style={styles.dividerRow}>
+        <View style={styles.dividerLine} />
+        <Text style={styles.dividerText}>OR</Text>
+        <View style={styles.dividerLine} />
+      </View>
+      <PressableScale onPress={onGoLive} scaleTo={0.97}>
+        <View style={styles.goLiveBtn}>
+          <Radio size={16} color="#fff" />
+          <Text style={styles.goLiveText}>Go live instead</Text>
+        </View>
+      </PressableScale>
     </View>
   );
 }
@@ -600,6 +617,20 @@ const styles = StyleSheet.create({
     borderRadius: Radius.pill,
   },
   choiceText: { color: Colors.ink, fontSize: 13, fontWeight: "900" },
+  dividerRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 18, width: "100%" },
+  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: Colors.borderHi },
+  dividerText: { color: Colors.textDim, fontSize: 10, fontWeight: "800", letterSpacing: 1 },
+  goLiveBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    width: "100%",
+    height: 46,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.magenta,
+  },
+  goLiveText: { color: "#fff", fontSize: 14, fontWeight: "900" },
   label: { ...microLabel, color: Colors.textDim, marginTop: 24, marginBottom: 9 },
   input: {
     minHeight: 52,
