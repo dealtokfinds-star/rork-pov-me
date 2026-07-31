@@ -3,7 +3,7 @@
 
 create table if not exists public.unlocks (
   id uuid primary key default gen_random_uuid(),
-  fan_id uuid not null references public.profiles(id) on delete cascade,
+  fan_id text not null references public.profiles(id) on delete cascade,
   episode_id uuid references public.episodes(id) on delete cascade,
   stream_id uuid references public.live_streams(id) on delete cascade,
   price numeric not null,

@@ -45,7 +45,7 @@ end;
 $$;
 
 -- bump_dm_thread: update last_message_at + unread counts
-create or replace function public.bump_dm_thread(p_sender_id uuid, p_thread_id uuid)
+create or replace function public.bump_dm_thread(p_sender_id text, p_thread_id uuid)
 returns void
 language plpgsql
 security definer

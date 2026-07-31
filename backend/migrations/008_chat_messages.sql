@@ -4,7 +4,7 @@
 create table if not exists public.chat_messages (
   id uuid primary key default gen_random_uuid(),
   stream_id uuid not null references public.live_streams(id) on delete cascade,
-  user_id uuid not null references public.profiles(id) on delete cascade,
+  user_id text not null references public.profiles(id) on delete cascade,
   user_name text not null,
   text text,
   kind text not null default 'chat', -- chat | tip | gift | join | system

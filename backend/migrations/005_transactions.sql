@@ -3,8 +3,8 @@
 
 create table if not exists public.transactions (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references public.profiles(id) on delete cascade,
-  creator_id uuid references public.profiles(id),
+  user_id text not null references public.profiles(id) on delete cascade,
+  creator_id text references public.profiles(id),
   kind text not null, -- topup | sub | ppv | tip | payout | gift
   label text not null,
   amount numeric not null,

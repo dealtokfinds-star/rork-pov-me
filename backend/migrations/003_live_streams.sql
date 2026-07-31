@@ -3,7 +3,7 @@
 
 create table if not exists public.live_streams (
   id uuid primary key default gen_random_uuid(),
-  creator_id uuid not null references public.profiles(id) on delete cascade,
+  creator_id text not null references public.profiles(id) on delete cascade,
   title text not null default 'Untitled stream',
   thumb_url text,
   category text not null default 'global',

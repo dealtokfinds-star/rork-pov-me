@@ -3,8 +3,8 @@
 
 create table if not exists public.dm_threads (
   id uuid primary key default gen_random_uuid(),
-  creator_id uuid not null references public.profiles(id) on delete cascade,
-  fan_id uuid not null references public.profiles(id) on delete cascade,
+  creator_id text not null references public.profiles(id) on delete cascade,
+  fan_id text not null references public.profiles(id) on delete cascade,
   fan_unread_count integer default 0,
   creator_unread_count integer default 0,
   last_message_at timestamptz,
@@ -15,7 +15,7 @@ create table if not exists public.dm_threads (
 create table if not exists public.dm_messages (
   id uuid primary key default gen_random_uuid(),
   thread_id uuid not null references public.dm_threads(id) on delete cascade,
-  sender_id uuid not null references public.profiles(id) on delete cascade,
+  sender_id text not null references public.profiles(id) on delete cascade,
   text text,
   attachment_url text,
   is_paid boolean default false,

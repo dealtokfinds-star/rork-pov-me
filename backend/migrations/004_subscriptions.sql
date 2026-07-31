@@ -3,8 +3,8 @@
 
 create table if not exists public.subscriptions (
   id uuid primary key default gen_random_uuid(),
-  fan_id uuid not null references public.profiles(id) on delete cascade,
-  creator_id uuid not null references public.profiles(id) on delete cascade,
+  fan_id text not null references public.profiles(id) on delete cascade,
+  creator_id text not null references public.profiles(id) on delete cascade,
   price numeric not null default 9.99,
   active boolean default true,
   status text, -- active | canceled | past_due | trialing

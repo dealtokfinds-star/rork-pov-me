@@ -2,7 +2,7 @@
 -- User profile/account table. One row per signed-in user (id = auth user id).
 
 create table if not exists public.profiles (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key, -- Rork Auth user IDs are strings (e.g. "usr_...")
   email text,
   name text,
   handle text unique,
@@ -22,7 +22,7 @@ create table if not exists public.profiles (
   kyc_submitted_at timestamptz,
   kyc_verified_at timestamptz,
   kyc_reviewed_at timestamptz,
-  kyc_reviewed_by uuid,
+  kyc_reviewed_by text,
   kyc_last_reason text,
   kyc_session_id text,
   kyc_session_url text,

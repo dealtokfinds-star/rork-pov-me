@@ -3,7 +3,7 @@
 
 create table if not exists public.email_log (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid references public.profiles(id) on delete set null,
+  user_id text references public.profiles(id) on delete set null,
   to_email text not null,
   subject text not null,
   template text,

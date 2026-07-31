@@ -3,7 +3,7 @@
 
 create table if not exists public.payouts (
   id uuid primary key default gen_random_uuid(),
-  creator_id uuid not null references public.profiles(id) on delete cascade,
+  creator_id text not null references public.profiles(id) on delete cascade,
   amount numeric not null,
   currency text default 'USD',
   method text, -- paypal | bank | stripe
@@ -18,7 +18,7 @@ create table if not exists public.payouts (
 
 create table if not exists public.payout_requests (
   id uuid primary key default gen_random_uuid(),
-  creator_id uuid not null references public.profiles(id) on delete cascade,
+  creator_id text not null references public.profiles(id) on delete cascade,
   amount numeric not null,
   payout_method text,
   payout_handle text,
@@ -27,7 +27,7 @@ create table if not exists public.payout_requests (
   status text default 'pending', -- pending | approved | paid | rejected
   admin_note text,
   processed_at timestamptz,
-  processed_by uuid references public.profiles(id),
+  processed_by text references public.profiles(id),
   requested_at timestamptz default now()
 );
 

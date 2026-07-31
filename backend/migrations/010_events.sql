@@ -3,8 +3,8 @@
 
 create table if not exists public.events (
   id bigserial primary key,
-  user_id uuid not null references public.profiles(id) on delete cascade,
-  creator_id uuid references public.profiles(id),
+  user_id text not null references public.profiles(id) on delete cascade,
+  creator_id text references public.profiles(id),
   episode_id uuid references public.episodes(id) on delete cascade,
   stream_id uuid references public.live_streams(id) on delete cascade,
   kind text not null, -- view | like | follow | tip | subscribe | unlock | publish | go_live
