@@ -1,6 +1,6 @@
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { Redirect, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { Bell, Inbox, Wallet2, Zap } from "lucide-react-native";
 import React, { useMemo, useState } from "react";
 import { FlatList, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -54,7 +54,6 @@ export default function FeedScreen() {
   }, [mode, activeSubs, category, interests, allEpisodes]);
 
   if (!hydrated) return <View style={styles.screen} />;
-  if (!onboarded) return <Redirect href="/onboarding" />;
 
   return (
     <View style={styles.screen}>
