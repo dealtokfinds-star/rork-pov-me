@@ -1,9 +1,11 @@
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
-import React, { useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   Animated,
+  Dimensions,
   Platform,
   Pressable,
   StyleSheet,
@@ -345,6 +347,121 @@ export function ProgressBar({ progress, color = Colors.lime }: { progress: numbe
           },
         ]}
       />
+    </View>
+  );
+}
+
+interface ConfettiPiece {
+  progress: Animated.Value;
+  x: number;
+  drift: number;
+  size: number;
+  color: string;
+  delay: number;
+  spin: number;
+  fall: number;
+  isRound: boolean;
+}
+
+/**
+ * One-shot celebratory confetti burst (lime/cyan/magenta/gold). Renders over
+ * its parent, ignores touches, respects the system reduce-motion setting,
+ * and unmounts itself when the animation completes.
+ */
+export function ConfettiBurst({
+  count = 28,
+  duration = 1400,
+  colors = [Colors.lime, Colors.cyan, Colors.magenta, Colors.gold, "#FFFFFF"],
+}: {
+  count?: number;
+  duration?: number;
+  colors?: string[];
+}) {
+  const { width, height } = Dimensions.get("window");
+  const pieces = useRef<ConfettiPiece[]>(
+    Array.from({ length: count }, (_, i) => ({
+      progress: new Animated.Value(0),
+      x: Math.random() * width,
+      drift: (Math.random() - 0.5) * 110,
+      size: 6 + Math.random() * 6,
+      color: colors[i % colors.length],
+      delay: Math.random() * 280,
+      spin: (Math.random() > 0.5 ? 1 : -1) * (540 + Math.random() * 540),
+      fall: height * (0.45 + Math.random() * 0.35),
+      isRound: Math.random() > 0.6,
+    })),
+  ).current;
+  const [active, setActive] = useState<boolean>(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((reduced) => {
+        if (cancelled || reduced) return;
+        setActive(true);
+        Animated.parallel(
+          pieces.map((p) =>
+            Animated.sequence([
+              Animated.delay(p.delay),
+              Animated.timing(p.progress, {
+                toValue: 1,
+                duration,
+                useNativeDriver: true,
+              }),
+            ]),
+          ),
+        ).start(() => {
+          if (!cancelled) setActive(false);
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [duration, pieces]);
+
+  if (!active) return null;
+
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      {pieces.map((p, i) => (
+        <Animated.View
+          key={`confetti-${i}`}
+          style={{
+            position: "absolute",
+            top: -24,
+            left: p.x,
+            width: p.size,
+            height: p.isRound ? p.size : p.size * 1.7,
+            borderRadius: p.isRound ? p.size / 2 : 2,
+            backgroundColor: p.color,
+            opacity: p.progress.interpolate({
+              inputRange: [0, 0.08, 0.75, 1],
+              outputRange: [0, 1, 1, 0],
+            }),
+            transform: [
+              {
+                translateY: p.progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, p.fall],
+                }),
+              },
+              {
+                translateX: p.progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, p.drift],
+                }),
+              },
+              {
+                rotate: p.progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ["0deg", `${p.spin}deg`],
+                }),
+              },
+            ],
+          }}
+        />
+      ))}
     </View>
   );
 }

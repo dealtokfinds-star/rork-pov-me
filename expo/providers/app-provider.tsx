@@ -23,6 +23,24 @@ import {
 } from "@/hooks/useServerData";
 
 const STORAGE_KEY = "povme.state.v1";
+const DRAFT_KEY = "povme.onboarding.draft.v1";
+
+/** Where the user said they're headed during onboarding. */
+export type OnboardingIntent = "viewer" | "creator";
+
+/**
+ * Draft of an unfinished onboarding session — persisted so an abandoned
+ * setup can resume exactly where it left off ("Pick up where you left off").
+ */
+export interface OnboardingDraft {
+  step: number;
+  intent: OnboardingIntent | null;
+  name: string;
+  avatarSeed: number;
+  picked: PovCategory[];
+  followed: string[];
+  savedAt: number;
+}
 
 /**
  * Persisted state is now a CACHE ONLY. The source of truth is the server
@@ -58,6 +76,7 @@ export const [AppProvider, useApp] = createContextHook(() => {
   const queryClient = useQueryClient();
 
   const [state, setState] = useState<PersistedState>(DEFAULT_STATE);
+  const [onboardingDraft, setOnboardingDraft] = useState<OnboardingDraft | null>(null);
   const [hydrated, setHydrated] = useState<boolean>(false);
   const [kycStatus, setKycStatus] = useState<string>("unverified");
   const [kycLastReason, setKycLastReason] = useState<string | null>(null);
@@ -68,10 +87,20 @@ export const [AppProvider, useApp] = createContextHook(() => {
     let cancelled = false;
     const load = async (): Promise<void> => {
       try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        const [raw, draftRaw] = await Promise.all([
+          AsyncStorage.getItem(STORAGE_KEY),
+          AsyncStorage.getItem(DRAFT_KEY),
+        ]);
         if (raw && !cancelled) {
           const parsed = JSON.parse(raw) as Partial<PersistedState>;
           setState({ ...DEFAULT_STATE, ...parsed });
+        }
+        if (draftRaw && !cancelled) {
+          try {
+            setOnboardingDraft(JSON.parse(draftRaw) as OnboardingDraft);
+          } catch {
+            AsyncStorage.removeItem(DRAFT_KEY).catch(() => {});
+          }
         }
       } catch (error) {
         console.log("[povme] failed to restore state", error);
@@ -313,17 +342,34 @@ export const [AppProvider, useApp] = createContextHook(() => {
 
   // ─── Onboarding / profile updates ──────────────────────────────────────────
   const completeOnboarding = useCallback(
-    (name: string, interests: PovCategory[], _followed: string[] = []) => {
+    (name: string, interests: PovCategory[], _followed: string[] = [], handle?: string) => {
       setState((prev) => ({
         ...prev,
         onboarded: true,
         displayName: name.trim().length > 0 ? name.trim() : prev.displayName,
-        handle: name.trim().length > 0 ? name.trim().toLowerCase().replace(/\s+/g, "") : prev.handle,
+        handle:
+          handle ??
+          (name.trim().length > 0 ? name.trim().toLowerCase().replace(/\s+/g, "") : prev.handle),
         interests,
       }));
+      setOnboardingDraft(null);
+      AsyncStorage.removeItem(DRAFT_KEY).catch(() => {});
     },
     [],
   );
+
+  /** Persist an in-progress onboarding session so it can resume later. */
+  const saveOnboardingDraft = useCallback((draft: OnboardingDraft) => {
+    setOnboardingDraft(draft);
+    AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(draft)).catch((error) => {
+      console.log("[povme] failed to persist onboarding draft", error);
+    });
+  }, []);
+
+  const clearOnboardingDraft = useCallback(() => {
+    setOnboardingDraft(null);
+    AsyncStorage.removeItem(DRAFT_KEY).catch(() => {});
+  }, []);
 
   const becomeCreator = useCallback((price: number) => {
     setState((prev) => ({ ...prev, isCreator: true, creatorPrice: price }));
@@ -393,6 +439,8 @@ export const [AppProvider, useApp] = createContextHook(() => {
 
   const resetAccount = useCallback(() => {
     setState({ ...DEFAULT_STATE });
+    setOnboardingDraft(null);
+    AsyncStorage.removeItem(DRAFT_KEY).catch(() => {});
   }, []);
 
   // ─── Creator stats (real, from server) ─────────────────────────────────────
@@ -444,6 +492,9 @@ export const [AppProvider, useApp] = createContextHook(() => {
     toggleLiked,
     // Onboarding
     completeOnboarding,
+    onboardingDraft,
+    saveOnboardingDraft,
+    clearOnboardingDraft,
     becomeCreator,
     setCreatorPrice,
     // Episodes
