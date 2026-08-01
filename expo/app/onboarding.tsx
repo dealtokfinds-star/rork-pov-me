@@ -28,6 +28,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import MotionReelBackdrop from "@/components/MotionReelBackdrop";
 import {
   Avatar,
   Button,
@@ -277,7 +278,9 @@ export default function OnboardingScreen() {
     <View style={styles.screen}>
       {slide ? (
         <>
-          <Image source={{ uri: slide.image }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          {/* Continuous motion reel behind all intro slides — the onboarding
+              plays like a single presentation while copy advances on top. */}
+          <MotionReelBackdrop posterUri={slide.image} />
           <LinearGradient
             colors={["rgba(8,8,10,0.5)", "rgba(8,8,10,0.82)", Colors.ink]}
             locations={[0, 0.55, 0.95]}

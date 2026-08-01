@@ -1,4 +1,3 @@
-import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Apple, ArrowRight, ChevronRight, Eye, Shield, TriangleAlert } from "lucide-react-native";
 import React, { useEffect, useRef } from "react";
@@ -14,6 +13,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import MotionReelBackdrop from "@/components/MotionReelBackdrop";
 import { PressableScale } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import { useAuth } from "@/hooks/useAuth";
@@ -49,14 +49,11 @@ export default function SignInScreen() {
 
   return (
     <View style={styles.screen}>
-      {/* Atmospheric hero image — a first-person POV suggestion. */}
-      <Image
-        source={{
-          uri: "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=1200&q=80",
-        }}
-        style={StyleSheet.absoluteFill}
-        contentFit="cover"
-        blurRadius={Platform.OS === "web" ? 0 : 8}
+      {/* Ambient motion reel — dark streaming-UI motion graphics with shifting
+          lime/cyan/magenta glow. Poster photo shows instantly, reel fades in. */}
+      <MotionReelBackdrop
+        posterUri="https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=1200&q=80"
+        posterBlurRadius={Platform.OS === "web" ? 0 : 8}
       />
       <LinearGradient
         colors={["rgba(8,8,10,0.45)", "rgba(8,8,10,0.78)", Colors.ink]}
