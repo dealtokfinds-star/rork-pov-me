@@ -34,14 +34,14 @@ function authHeader(): string {
   return "Basic " + btoa(`${id}:${secret}`);
 }
 
-const API = "https://api.mux.com/v1";
+const API = "https://api.mux.com";
 
 interface MuxRequestInit extends RequestInit {
   /** When true, a non-2xx response throws `MuxApiError` with the body. */
   throwOnError?: boolean;
 }
 
-async function muxFetch<T = unknown>(
+export async function muxFetch<T = unknown>(
   path: string,
   init: MuxRequestInit = {},
 ): Promise<T> {
@@ -142,7 +142,7 @@ export function createLiveStream(opts: {
   if (opts.isCoStream) {
     body["embedded_subtitles"] = [];
   }
-  return muxFetch<MuxLiveStream>("/video/live-streams", {
+  return muxFetch<MuxLiveStream>("/video/v1/live-streams", {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -150,26 +150,26 @@ export function createLiveStream(opts: {
 
 /** Fetch a live stream by id. */
 export function getLiveStream(id: string): Promise<MuxLiveStream> {
-  return muxFetch<MuxLiveStream>(`/video/live-streams/${id}`);
+  return muxFetch<MuxLiveStream>(`/video/v1/live-streams/${id}`);
 }
 
 /** Signal Mux that the stream is over and disable the ingest endpoint. */
 export function endLiveStream(id: string): Promise<void> {
-  return muxFetch<void>(`/video/live-streams/${id}/complete`, {
+  return muxFetch<void>(`/video/v1/live-streams/${id}/complete`, {
     method: "POST",
   });
 }
 
 /** Hard-delete a live stream (used on early teardown before going live). */
 export function deleteLiveStream(id: string): Promise<void> {
-  return muxFetch<void>(`/video/live-streams/${id}`, {
+  return muxFetch<void>(`/video/v1/live-streams/${id}`, {
     method: "DELETE",
   });
 }
 
 /** Fetch the asset created from a live stream (the replay VOD). */
 export function getAsset(id: string): Promise<MuxAsset> {
-  return muxFetch<MuxAsset>(`/video/assets/${id}`);
+  return muxFetch<MuxAsset>(`/video/v1/assets/${id}`);
 }
 
 /**

@@ -32,7 +32,7 @@ interface CreatorStatsResponse {
 
 const PLATFORM_FEE = 0.2; // 20% platform cut
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -130,3 +130,5 @@ export default async function handler(req: Request): Promise<Response> {
 
   return json(response, 200);
 }
+
+Deno.serve(handler);

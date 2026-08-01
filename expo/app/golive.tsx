@@ -101,7 +101,7 @@ export default function GoLiveScreen() {
         category,
         access,
         streamId: stream.streamId,
-        rtmpUrl: stream.rtmpIngestUrl,
+        rtmpUrl: stream.rtmpIngestUrl ?? "",
         rtmpKey: stream.rtmpStreamKey ?? "",
         hlsUrl: stream.hlsPlaybackUrl ?? "",
         source,

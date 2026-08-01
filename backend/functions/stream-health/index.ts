@@ -17,7 +17,7 @@
 import { corsHeaders, createUserClient, json, requireAuth } from "../_shared/auth.ts";
 import { getLiveStream, liveStreamMetrics } from "../_shared/mux.ts";
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -120,3 +120,5 @@ export default async function handler(req: Request): Promise<Response> {
     activeAssetId: mux?.active_asset_id ?? null,
   });
 }
+
+Deno.serve(handler);

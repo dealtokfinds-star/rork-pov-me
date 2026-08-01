@@ -34,8 +34,12 @@ export function useLiveNow(): void {
       }, 1000);
     };
 
+    // Unique topic per mount: `supabase.channel()` returns the SAME instance
+    // for an existing topic, and adding postgres_changes callbacks to an
+    // already-subscribed channel throws ("cannot add postgres_changes
+    // callbacks … after subscribe()") on remounts/fast-refresh.
     const channel = supabase
-      .channel("live-now")
+      .channel(`live-now-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "live_streams" },

@@ -24,8 +24,9 @@ export type LatencyMode = "low" | "reduced" | "standard";
 /** Response from create-live-stream. RTMP key is host-only (RLS enforced). */
 export interface CreatedLiveStream {
   streamId: string;
-  muxLiveStreamId: string;
-  rtmpIngestUrl: string;
+  /** Null when Mux provisioning was skipped (phone-source fallback). */
+  muxLiveStreamId: string | null;
+  rtmpIngestUrl: string | null;
   rtmpStreamKey: string | null;
   hlsPlaybackUrl: string | null;
   muxPlaybackId: string | null;
@@ -83,22 +84,56 @@ export interface EndLiveStreamResult {
 // API wrappers
 // ---------------------------------------------------------------------------
 
+/** Hard cap on edge function calls so the UI can never hang on a spinner. */
+const INVOKE_TIMEOUT_MS = 25_000;
+
+/**
+ * Invoke an edge function with a timeout guard and real error extraction.
+ * `supabase.functions.invoke` hides the server's error body behind a generic
+ * "non-2xx status code" message — this unwraps `{ error }` from the response
+ * so the UI can show what actually went wrong (e.g. "Only creators can go
+ * live"). A 25s timeout turns a dead endpoint into a retryable error instead
+ * of an infinite "Setting up your stream…" spinner.
+ */
+async function invokeFn<T>(name: string, body: unknown): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error("The server took too long to respond. Please try again.")),
+        INVOKE_TIMEOUT_MS,
+      );
+    });
+    const { data, error } = await Promise.race([
+      supabase.functions.invoke<T>(name, { body: body as Record<string, unknown> }),
+      timeout,
+    ]);
+    if (error) {
+      const ctx = (error as { context?: Response }).context;
+      if (ctx && typeof ctx.json === "function") {
+        const detail = (await ctx.json().catch(() => null)) as { error?: string } | null;
+        if (detail?.error) throw new Error(detail.error);
+        throw new Error(`Request failed (${ctx.status})`);
+      }
+      throw error instanceof Error ? error : new Error(String(error));
+    }
+    if (!data) throw new Error(`${name} returned no data`);
+    return data;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * Create a Mux Live Stream + DB row. Host-only. Returns the RTMP ingest
  * URL + stream key the host should feed into OBS / their chest rig / the
  * desktop encoder. For phone source the key is still returned so a future
  * native RTMP module (HaishinKit) can use it; Expo Go records locally.
  */
-export async function createLiveStream(
+export function createLiveStream(
   params: CreateLiveStreamParams,
 ): Promise<CreatedLiveStream> {
-  const { data, error } = await supabase.functions.invoke<CreatedLiveStream>(
-    "create-live-stream",
-    { body: params },
-  );
-  if (error) throw error;
-  if (!data) throw new Error("create-live-stream returned no data");
-  return data;
+  return invokeFn<CreatedLiveStream>("create-live-stream", params);
 }
 
 /**
@@ -106,49 +141,31 @@ export async function createLiveStream(
  * signed HLS url when allowed, or a reason code the viewer UI can branch on
  * (subscribe / ppv / unauthenticated / ended / not_found).
  */
-export async function getStreamAccess(
+export function getStreamAccess(
   streamId: string,
 ): Promise<StreamAccessResult> {
-  const { data, error } = await supabase.functions.invoke<StreamAccessResult>(
-    "stream-access",
-    { body: { streamId } },
-  );
-  if (error) throw error;
-  if (!data) throw new Error("stream-access returned no data");
-  return data;
+  return invokeFn<StreamAccessResult>("stream-access", { streamId });
 }
 
 /**
  * Real-time health metrics for the host dashboard. Poll every 5-10s while
  * broadcasting. Only the stream owner may call this (RLS enforced).
  */
-export async function getStreamHealth(
+export function getStreamHealth(
   streamId: string,
 ): Promise<StreamHealth> {
-  const { data, error } = await supabase.functions.invoke<StreamHealth>(
-    "stream-health",
-    { body: { streamId } },
-  );
-  if (error) throw error;
-  if (!data) throw new Error("stream-health returned no data");
-  return data;
+  return invokeFn<StreamHealth>("stream-health", { streamId });
 }
 
 /**
  * End the stream. Triggers Mux `complete` + replay VOD creation (when
  * replayEnabled). Host-only. Safe to call multiple times — idempotent.
  */
-export async function endLiveStream(
+export function endLiveStream(
   streamId: string,
   replayTitle?: string,
 ): Promise<EndLiveStreamResult> {
-  const { data, error } = await supabase.functions.invoke<EndLiveStreamResult>(
-    "end-live-stream",
-    { body: { streamId, replayTitle } },
-  );
-  if (error) throw error;
-  if (!data) throw new Error("end-live-stream returned no data");
-  return data;
+  return invokeFn<EndLiveStreamResult>("end-live-stream", { streamId, replayTitle });
 }
 
 // ---------------------------------------------------------------------------

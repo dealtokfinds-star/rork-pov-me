@@ -27,7 +27,7 @@ interface EndBody {
 const ASSET_POLL_MS = 2000;
 const ASSET_POLL_MAX_ATTEMPTS = 10; // 20s of synchronous polling
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -135,3 +135,5 @@ export default async function handler(req: Request): Promise<Response> {
     replayReady: replayEpisodeId !== null,
   });
 }
+
+Deno.serve(handler);

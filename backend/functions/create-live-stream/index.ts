@@ -36,7 +36,7 @@ interface CreateBody {
   primaryStreamId?: string;
 }
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -105,8 +105,12 @@ export default async function handler(req: Request): Promise<Response> {
     isCoStream = true;
   }
 
-  // Create the Mux Live Stream.
-  let mux: MuxLiveStream;
+  // Create the Mux Live Stream. For phone-source streams the broadcast is
+  // driven by the app itself (presence + is_live flip), so a Mux outage or
+  // missing credentials must NOT block going live — degrade to a DB-only
+  // stream row. Encoder sources (chest/desktop) genuinely need the RTMP
+  // endpoint, so those still hard-fail.
+  let mux: MuxLiveStream | null = null;
   try {
     mux = await createLiveStream({
       latencyMode: body.latencyMode ?? "low",
@@ -115,13 +119,16 @@ export default async function handler(req: Request): Promise<Response> {
     });
   } catch (err) {
     console.error("[create-live-stream] mux create failed", err);
-    return json(
-      { error: "Could not start the live stream provider. Try again." },
-      502,
-    );
+    if ((body.streamSource ?? "phone") !== "phone") {
+      return json(
+        { error: "Could not start the live stream provider. Try again." },
+        502,
+      );
+    }
+    mux = null;
   }
 
-  const playback = mux.playback_ids?.[0];
+  const playback = mux?.playback_ids?.[0];
   const hlsUrl = playback
     ? `https://stream.mux.com/${playback.id}.m3u8`
     : null;
@@ -140,9 +147,11 @@ export default async function handler(req: Request): Promise<Response> {
     is_live: false, // goes true when Mux sends `video.live_stream.connected`
     started_at: new Date().toISOString(),
     health_status: "created",
-    mux_live_stream_id: mux.id,
-    rtmp_ingest_url: mux.rtmp_ingest_url ?? "rtmp://global-live.mux.com:5222/app",
-    rtmp_stream_key: mux.stream_key,
+    mux_live_stream_id: mux?.id ?? null,
+    rtmp_ingest_url: mux
+      ? mux.rtmp_ingest_url ?? "rtmp://global-live.mux.com:5222/app"
+      : null,
+    rtmp_stream_key: mux?.stream_key ?? null,
     mux_playback_id: playback?.id ?? null,
     hls_playback_url: hlsUrl,
     latency_mode: body.latencyMode ?? "low",
@@ -160,19 +169,23 @@ export default async function handler(req: Request): Promise<Response> {
     // Best-effort cleanup: delete the Mux live stream we just created so we
     // don't leak orphan ingest endpoints.
     console.error("[create-live-stream] insert failed", insertErr);
-    try {
-      await import("../_shared/mux.ts").then((m) => m.deleteLiveStream(mux.id));
-    } catch {
-      // ignore
+    if (mux) {
+      try {
+        await import("../_shared/mux.ts").then((m) => m.deleteLiveStream(mux!.id));
+      } catch {
+        // ignore
+      }
     }
     return json({ error: "Could not create the stream record." }, 500);
   }
 
   return json({
     streamId: row.id,
-    muxLiveStreamId: mux.id,
-    rtmpIngestUrl: mux.rtmp_ingest_url ?? "rtmp://global-live.mux.com:5222/app",
-    rtmpStreamKey: mux.stream_key ?? null,
+    muxLiveStreamId: mux?.id ?? null,
+    rtmpIngestUrl: mux
+      ? mux.rtmp_ingest_url ?? "rtmp://global-live.mux.com:5222/app"
+      : null,
+    rtmpStreamKey: mux?.stream_key ?? null,
     hlsPlaybackUrl: hlsUrl,
     muxPlaybackId: playback?.id ?? null,
     // Observed/streamed-only fields the host UI needs:
@@ -181,3 +194,5 @@ export default async function handler(req: Request): Promise<Response> {
     isCoStream,
   });
 }
+
+Deno.serve(handler);
