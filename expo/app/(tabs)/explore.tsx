@@ -81,6 +81,13 @@ export default function ExploreScreen() {
 
   const hero = creators[0] ?? allCreators[0];
   const searching = q.length > 0;
+  const filtersDirty = searching || category !== "all" || sort !== "trending";
+
+  const resetFilters = () => {
+    setQuery("");
+    setCategory("all");
+    setSort("trending");
+  };
   const isFetching = searching ? searchQuery.isFetching : (activeSortDef.mode === "trending" ? trendingQuery.isFetching : activeSortDef.mode === "rising" ? risingQuery.isFetching : false);
 
   return (
@@ -115,10 +122,15 @@ export default function ExploreScreen() {
             </PressableScale>
           ) : null}
         </View>
-        <View style={styles.filterBtn}>
-          <SlidersHorizontal size={17} color={Colors.lime} />
-        </View>
+        <PressableScale onPress={resetFilters} scaleTo={0.9} disabled={!filtersDirty}>
+          <View style={[styles.filterBtn, !filtersDirty && styles.filterBtnIdle]}>
+            <SlidersHorizontal size={17} color={filtersDirty ? Colors.ink : Colors.lime} />
+          </View>
+        </PressableScale>
       </View>
+      {filtersDirty ? (
+        <Text style={styles.filterHint}>Filters on — tap the dial to reset</Text>
+      ) : null}
 
       <ScrollView
         horizontal
@@ -162,11 +174,8 @@ export default function ExploreScreen() {
           icon={<Search size={24} color={Colors.textMid} />}
           title="No creators found"
           body={`Nothing matches "${query}". Try a city, a lifestyle, or clear your filters.`}
-          action="Clear search"
-          onAction={() => {
-            setQuery("");
-            setCategory("all");
-          }}
+          action="Clear filters"
+          onAction={resetFilters}
         />
       ) : (
         <>
@@ -299,11 +308,22 @@ const styles = StyleSheet.create({
     width: 46,
     height: 46,
     borderRadius: 23,
-    backgroundColor: "rgba(204,255,0,0.1)",
+    backgroundColor: Colors.lime,
     borderWidth: 1,
-    borderColor: "rgba(204,255,0,0.3)",
+    borderColor: Colors.lime,
     alignItems: "center",
     justifyContent: "center",
+  },
+  filterBtnIdle: {
+    backgroundColor: "rgba(204,255,0,0.1)",
+    borderColor: "rgba(204,255,0,0.3)",
+  },
+  filterHint: {
+    color: Colors.textDim,
+    fontSize: 11,
+    fontWeight: "700",
+    paddingHorizontal: 18,
+    paddingTop: 8,
   },
   chipRail: { paddingHorizontal: 18, gap: 8, paddingTop: 14 },
   sortRail: { paddingHorizontal: 18, gap: 18, paddingTop: 16 },

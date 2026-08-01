@@ -16,8 +16,8 @@ import {
   TrendingUp,
   Users,
 } from "lucide-react-native";
-import React, { useMemo, useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button, Chip, EmptyState, PressableScale, ProgressBar, SectionHeader, StatTile, Tag } from "@/components/ui";
@@ -45,6 +45,24 @@ export default function StudioScreen() {
   const list = useMemo<StudioEpisode[]>(
     () => (filter === "all" ? studio : studio.filter((e) => e.status === filter)),
     [studio, filter],
+  );
+
+  const confirmDelete = useCallback(
+    (ep: StudioEpisode): void => {
+      Alert.alert(
+        "Delete this episode?",
+        `“${ep.title}” will be removed for every fan who unlocked or saved it. This cannot be undone.`,
+        [
+          { text: "Keep it", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: () => void deleteStudioEpisode(ep.id),
+          },
+        ],
+      );
+    },
+    [deleteStudioEpisode],
   );
 
   if (!isCreator) {
@@ -178,7 +196,7 @@ export default function StudioScreen() {
       </View>
 
       <View style={styles.statRow}>
-        <StatTile label="Subscribers" value={formatCount(creatorStats.subscriberCount)} sub="+42 this week" />
+        <StatTile label="Subscribers" value={formatCount(creatorStats.subscriberCount)} sub="active now" />
         <StatTile
           label="PPV unlocks"
           value={`${creatorStats.ppvUnlocks}`}
@@ -297,7 +315,7 @@ export default function StudioScreen() {
                   </Text>
                 </View>
               </View>
-              <PressableScale onPress={() => deleteStudioEpisode(ep.id)} scaleTo={0.85}>
+              <PressableScale onPress={() => confirmDelete(ep)} scaleTo={0.85}>
                 <View style={styles.trash}>
                   <Trash2 size={15} color={Colors.textDim} />
                 </View>

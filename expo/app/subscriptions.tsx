@@ -1,7 +1,7 @@
 import { useRouter } from "expo-router";
 import { CalendarClock, RotateCcw, Wallet2, XCircle } from "lucide-react-native";
 import React from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Avatar, Button, EmptyState, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
@@ -14,9 +14,38 @@ export default function SubscriptionsScreen() {
   const router = useRouter();
   const { subscriptions, cancelSubscriptionViaStripe, monthlySpend, balance } = useApp();
   const [cancelling, setCancelling] = React.useState<string | null>(null);
+  const [cancelError, setCancelError] = React.useState<string | null>(null);
 
   const active = subscriptions.filter((s) => s.active);
   const cancelled = subscriptions.filter((s) => !s.active);
+
+  const confirmCancel = (sub: SubInfo): void => {
+    Alert.alert(
+      "Cancel this subscription?",
+      `You keep access until ${new Date(sub.renewsAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })}, then it won't renew.`,
+      [
+        { text: "Keep subscription", style: "cancel" },
+        {
+          text: "Cancel it",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setCancelling(sub.creatorId);
+              setCancelError(null);
+              const result = await cancelSubscriptionViaStripe(sub.creatorId);
+              setCancelling(null);
+              if (result.success) {
+                haptic("medium");
+              } else {
+                haptic("heavy");
+                setCancelError(result.error ?? "Could not cancel — try again.");
+              }
+            })();
+          },
+        },
+      ],
+    );
+  };
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
@@ -45,6 +74,12 @@ export default function SubscriptionsScreen() {
         />
       ) : null}
 
+      {cancelError ? (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{cancelError}</Text>
+        </View>
+      ) : null}
+
       {active.length > 0 ? (
         <>
           <Text style={styles.kicker}>Active</Text>
@@ -54,16 +89,8 @@ export default function SubscriptionsScreen() {
                 key={sub.creatorId}
                 sub={sub}
                 active
-                onCancel={async () => {
-                  setCancelling(sub.creatorId);
-                  const result = await cancelSubscriptionViaStripe(sub.creatorId);
-                  setCancelling(null);
-                  if (result.success) {
-                    haptic("medium");
-                  } else {
-                    haptic("heavy");
-                  }
-                }}
+                cancelling={cancelling === sub.creatorId}
+                onCancel={() => confirmCancel(sub)}
                 onTip={() => router.push(`/tip/${sub.creatorId}`)}
                 onOpen={() => router.push(`/creator/${sub.creatorId}`)}
               />
@@ -100,6 +127,7 @@ export default function SubscriptionsScreen() {
 function SubCard({
   sub,
   active,
+  cancelling,
   onCancel,
   onResume,
   onTip,
@@ -107,6 +135,7 @@ function SubCard({
 }: {
   sub: SubInfo;
   active: boolean;
+  cancelling?: boolean;
   onCancel?: () => void;
   onResume?: () => void;
   onTip?: () => void;
@@ -150,17 +179,24 @@ function SubCard({
               label="Send a tip"
               variant="dark"
               small
-              onPress={onTip ?? (() => {})}
+              onPress={onTip}
               style={{ flex: 1 }}
             />
             <PressableScale
               onPress={onCancel}
               scaleTo={0.95}
               style={{ flex: 1 }}
+              disabled={cancelling}
             >
               <View style={styles.cancelBtn}>
-                <XCircle size={14} color={Colors.danger} />
-                <Text style={styles.cancelText}>Cancel</Text>
+                {cancelling ? (
+                  <ActivityIndicator size="small" color={Colors.danger} />
+                ) : (
+                  <>
+                    <XCircle size={14} color={Colors.danger} />
+                    <Text style={styles.cancelText}>Cancel</Text>
+                  </>
+                )}
               </View>
             </PressableScale>
           </View>
@@ -170,7 +206,7 @@ function SubCard({
           label="Resume subscription"
           small
           icon={<RotateCcw size={13} color={Colors.ink} />}
-          onPress={onResume ?? (() => {})}
+          onPress={onResume}
           style={{ marginTop: 12 }}
         />
       )}
@@ -228,5 +264,14 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   cancelText: { color: Colors.danger, fontSize: 13.5, fontWeight: "800" },
+  errorBox: {
+    marginTop: 14,
+    padding: 13,
+    borderRadius: Radius.md,
+    backgroundColor: "rgba(255,77,77,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,77,77,0.25)",
+  },
+  errorText: { color: Colors.danger, fontSize: 12.5, fontWeight: "700" },
   legal: { color: Colors.textDim, fontSize: 11.5, fontWeight: "600", lineHeight: 18, marginTop: 26 },
 });

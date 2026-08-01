@@ -97,7 +97,10 @@ export default function SubscribeScreen() {
     }
   };
 
-  if (done || already) {
+  // `already` flips only after the webhook writes the subscription row — that
+  // is the confirmed state. `done` (checkout browser returned) shows a
+  // processing state until then.
+  if (already) {
     return (
       <ScrollView style={styles.screen} contentContainerStyle={styles.successWrap}>
         <View style={styles.successIcon}>
@@ -118,6 +121,25 @@ export default function SubscribeScreen() {
         <Button label="Start watching" onPress={() => router.back()} style={{ marginTop: 24 }} />
         <PressableScale onPress={() => router.push("/subscriptions")}>
           <Text style={styles.manageLink}>Manage subscriptions</Text>
+        </PressableScale>
+      </ScrollView>
+    );
+  }
+
+  if (done) {
+    return (
+      <ScrollView style={styles.screen} contentContainerStyle={styles.successWrap}>
+        <View style={styles.successIcon}>
+          <Check size={30} color={Colors.ink} />
+        </View>
+        <Text style={styles.successTitle}>Payment processing</Text>
+        <Text style={styles.successBody}>
+          Your subscription to @{creator.handle} is being confirmed. Access unlocks automatically
+          the moment the payment clears — usually within a few seconds.
+        </Text>
+        <Button label="Back to profile" onPress={() => router.back()} style={{ marginTop: 24 }} />
+        <PressableScale onPress={() => router.push("/subscriptions")}>
+          <Text style={styles.manageLink}>View subscriptions</Text>
         </PressableScale>
       </ScrollView>
     );
@@ -180,8 +202,8 @@ export default function SubscribeScreen() {
         <View style={styles.payDivider} />
         <View style={styles.payRow}>
           <CreditCard size={16} color={Colors.textDim} />
-          <Text style={[styles.payLabel, { color: Colors.textDim }]}>Visa ···· 4242</Text>
-          <Text style={[styles.payValue, { color: Colors.textDim }]}>Backup</Text>
+          <Text style={[styles.payLabel, { color: Colors.textDim }]}>Card via Stripe Checkout</Text>
+          <Text style={[styles.payValue, { color: Colors.textDim }]}>Secure</Text>
         </View>
       </View>
 

@@ -1,3 +1,4 @@
+import { useEvent } from "expo";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -54,7 +55,6 @@ export default function LiveRoomScreen() {
     subscribeViaStripe,
     tipViaStripe,
     balance,
-    displayName,
   } = useApp();
 
   const { data: stream, isLoading } = useStream(id ?? "");
@@ -96,6 +96,10 @@ export default function LiveRoomScreen() {
     p.loop = true;
     if (access) p.play();
   });
+
+  // Real playback status — drives the connecting overlay (no fake states).
+  const statusEvent = useEvent(player, "statusChange", { status: player.status });
+  const playerStatus = statusEvent?.status ?? "idle";
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -150,7 +154,7 @@ export default function LiveRoomScreen() {
   if (isLoading || accessLoading) {
     return (
       <View style={[styles.screen, { alignItems: "center", justifyContent: "center" }]}>
-        <Text style={{ color: Colors.textMid, fontSize: 14, fontWeight: 700 }}>Loading…</Text>
+        <Text style={{ color: Colors.textMid, fontSize: 14, fontWeight: "700" }}>Loading…</Text>
       </View>
     );
   }
@@ -239,6 +243,12 @@ export default function LiveRoomScreen() {
         locations={[0, 0.25, 0.6, 1]}
         style={StyleSheet.absoluteFill}
       />
+
+      {hlsUrl && (playerStatus === "loading" || playerStatus === "idle") ? (
+        <View pointerEvents="none" style={styles.connectingWrap}>
+          <Text style={styles.connectingText}>Connecting to the stream…</Text>
+        </View>
+      ) : null}
 
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <PressableScale onPress={() => router.push(`/creator/${creator.id}`)} scaleTo={0.96} style={{ flex: 1 }}>
@@ -608,4 +618,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   heartLayer: { position: "absolute", right: 34, alignItems: "center" },
+  connectingWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  connectingText: { color: "rgba(255,255,255,0.75)", fontSize: 13, fontWeight: "800" },
 });

@@ -4,7 +4,6 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   CreditCard,
-  Gift,
   Lock,
   Plus,
   Shield,
@@ -83,7 +82,7 @@ export default function WalletScreen() {
           >
             <View style={[styles.topCard, processing === amount && styles.topCardBusy]}>
               {processing === amount ? (
-                <Text style={styles.topText}>···</Text>
+                <ActivityIndicator size="small" color={Colors.lime} />
               ) : (
                 <>
                   <Plus size={14} color={Colors.lime} />
@@ -99,18 +98,13 @@ export default function WalletScreen() {
       <View style={styles.methods}>
         <MethodRow
           icon={<CreditCard size={17} color={Colors.text} />}
-          label="Visa ···· 4242"
-          sub="Default · expires 09/29"
+          label="Card via Stripe Checkout"
+          sub="Your card details stay with Stripe — povme never sees them"
         />
         <MethodRow
           icon={<Shield size={17} color={Colors.cyan} />}
           label="Discreet billing"
           sub="Statements show POVM DIGITAL LLC"
-        />
-        <MethodRow
-          icon={<Gift size={17} color={Colors.gold} />}
-          label="Redeem a gift code"
-          sub="Creator promo codes and bundles"
         />
       </View>
 

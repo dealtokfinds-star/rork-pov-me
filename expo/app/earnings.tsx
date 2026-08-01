@@ -55,7 +55,7 @@ export default function EarningsScreen() {
     setWithdrawing(true);
     setPayoutError(null);
     try {
-      const result = await requestPayout(); // full available balance
+      await requestPayout(); // full available balance
       setRequested(true);
       haptic("success");
       void refetch();
@@ -178,12 +178,10 @@ export default function EarningsScreen() {
         </View>
       )}
 
-      <PressableScale>
-        <Text style={styles.legal}>
-          povme keeps 20% of gross. Lemon Squeezy handles tax remittance on fan payments.
-          Payouts run weekly to your saved PayPal or bank account.
-        </Text>
-      </PressableScale>
+      <Text style={styles.legal}>
+        povme keeps 20% of gross. Lemon Squeezy handles tax remittance on fan payments.
+        Payouts run weekly to your saved PayPal or bank account.
+      </Text>
     </ScrollView>
   );
 }

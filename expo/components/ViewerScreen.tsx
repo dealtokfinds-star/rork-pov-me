@@ -14,6 +14,7 @@
  *  - Tip / gift routing through the app wallet
  */
 
+import { useEvent } from "expo";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -65,7 +66,7 @@ interface ViewerScreenProps {
   title?: string;
 }
 
-type ViewHealth = "loading" | "playing" | "reconnecting" | "ended";
+type ViewHealth = "loading" | "playing" | "stalled" | "ended";
 
 export default function ViewerScreen(props: ViewerScreenProps): React.ReactElement | null {
   const routeParams = useLocalSearchParams<{ id: string }>();
@@ -91,7 +92,6 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
   const [viewers, setViewers] = useState<number>(stream?.viewers ?? 0);
   const [health, setHealth] = useState<ViewHealth>("loading");
   const [banner, setBanner] = useState<string | null>(null);
-  const [reconnectAttempts, setReconnectAttempts] = useState<number>(0);
   const [paymentPending, setPaymentPending] = useState<boolean>(false);
   const chatRef = useRef<ChatOverlayHandle>(null);
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -111,6 +111,34 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
     p.play();
   });
 
+  // Real player status — drives the loading/stalled overlays. No simulation.
+  const statusEvent = useEvent(player, "statusChange", { status: player.status });
+  const playerStatus = statusEvent?.status ?? "idle";
+
+  useEffect(() => {
+    if (!access) return;
+    if (!videoSource) {
+      setHealth("ended");
+      return;
+    }
+    if (playerStatus === "error") setHealth("stalled");
+    else if (playerStatus === "readyToPlay") setHealth("playing");
+    else setHealth("loading");
+  }, [access, videoSource, playerStatus]);
+
+  /** Re-attach the source after a playback error and try again. */
+  const retryPlayback = useCallback((): void => {
+    if (!videoSource) return;
+    setHealth("loading");
+    player
+      .replaceAsync(videoSource)
+      .then(() => player.play())
+      .catch((err: unknown) => {
+        console.log("[povme] retryPlayback failed", err);
+        setHealth("stalled");
+      });
+  }, [player, videoSource]);
+
   // ---- viewer count (real, from server) -----------------------------------
 
   useEffect(() => {
@@ -118,47 +146,6 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
     // Use the real viewer count from the stream row — updated by bump_stream_viewers RPC.
     setViewers(stream?.viewers ?? 0);
   }, [access, stream?.viewers]);
-
-  // Brief loading → playing transition so the UI shows a spinner state.
-  useEffect(() => {
-    if (!access) return;
-    setHealth("loading");
-    const t = setTimeout(() => setHealth("playing"), 600);
-    return () => clearTimeout(t);
-  }, [access]);
-
-  // Simulated network drops for the viewer side (rarer than host side).
-  useEffect(() => {
-    if (!access) return;
-    const dropTimer = setInterval(() => {
-      if (Math.random() > 0.985 && health === "playing") {
-        setHealth("reconnecting");
-        setReconnectAttempts(0);
-      }
-    }, 30_000);
-    return () => clearInterval(dropTimer);
-  }, [access, health]);
-
-  // Reconnect with exponential backoff (viewer side).
-  useEffect(() => {
-    if (health !== "reconnecting") return;
-    const attempt = reconnectAttempts + 1;
-    if (attempt > 4) {
-      setHealth("ended");
-      return;
-    }
-    const delay = Math.pow(2, attempt - 1) * 1000;
-    const t = setTimeout(() => {
-      if (Math.random() < 0.85) {
-        setHealth("playing");
-        setReconnectAttempts(0);
-        showBanner("Reconnected");
-      } else {
-        setReconnectAttempts(attempt);
-      }
-    }, delay);
-    return () => clearTimeout(t);
-  }, [health, reconnectAttempts]);
 
   // ---- banner helper -------------------------------------------------------
 
@@ -330,11 +317,11 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
         </View>
       ) : null}
 
-      {/* reconnect / ended overlay */}
-      {health === "reconnecting" || health === "ended" ? (
+      {/* stalled / ended overlay — driven by the real player status */}
+      {health === "stalled" || health === "ended" ? (
         <View style={styles.reconnectOverlay}>
           <View style={styles.reconnectIcon}>
-            {health === "reconnecting" ? (
+            {health === "stalled" ? (
               <AnimatedSpin>
                 <WifiOff size={26} color={Colors.gold} />
               </AnimatedSpin>
@@ -343,21 +330,23 @@ export default function ViewerScreen(props: ViewerScreenProps): React.ReactEleme
             )}
           </View>
           <Text style={styles.reconnectTitle}>
-            {health === "reconnecting" ? "Reconnecting…" : "Stream ended"}
+            {health === "stalled" ? "Playback interrupted" : "Stream ended"}
           </Text>
           <Text style={styles.reconnectBody}>
-            {health === "reconnecting"
-              ? `Attempt ${reconnectAttempts + 1} of 4`
+            {health === "stalled"
+              ? "The stream hit a network error. Tap retry to reconnect."
               : "The broadcaster went offline. Replay may be available shortly."}
           </Text>
-          {health === "ended" ? (
+          {health === "stalled" ? (
+            <Button label="Retry" variant="primary" onPress={retryPlayback} style={{ marginTop: 18 }} />
+          ) : (
             <Button
               label="Back to live"
               variant="primary"
               onPress={() => router.replace("/(tabs)/live")}
               style={{ marginTop: 18 }}
             />
-          ) : null}
+          )}
         </View>
       ) : null}
 

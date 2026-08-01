@@ -1,13 +1,13 @@
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { Calendar, Radio, Scissors, Users } from "lucide-react-native";
+import { Radio } from "lucide-react-native";
 import React, { useCallback, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { LiveStreamCard } from "@/components/cards";
-import { Avatar, Button, Chip, LiveBadge, PressableScale, SectionHeader, Tag } from "@/components/ui";
+import { Avatar, Button, Chip, EmptyState, LiveBadge, PressableScale, SectionHeader, Tag } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import {
   CATEGORIES,
@@ -18,9 +18,6 @@ import {
 import { useCreators, useStreams } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
 import type { Creator, PovCategory } from "@/types";
-
-const SCHEDULED: never[] = [];
-const CLIPS: never[] = [];
 
 export default function LiveScreen() {
   const insets = useSafeAreaInsets();
@@ -124,70 +121,29 @@ export default function LiveScreen() {
       </ScrollView>
 
       <SectionHeader kicker="Browse live" title="All channels" />
-      <View style={styles.grid}>
-        {streams.map((s) => (
-          <View key={s.id} style={styles.gridItem}>
-            <LiveStreamCard stream={s} wide />
-          </View>
-        ))}
-      </View>
-
-      <SectionHeader kicker="Fan-made" title="Top clips" action="Clip guide" onAction={() => router.push("/guidelines")} />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
-        {CLIPS.map((clip) => {
-          const c = clip as unknown as { id: string; creatorId: string; label: string; views: number };
-          const creator = getCreator(c.creatorId);
-          return (
-            <PressableScale key={c.id} scaleTo={0.96} onPress={() => router.push(`/creator/${c.creatorId}`)}>
-              <View style={styles.clip}>
-                {creator?.cover ? (
-                  <Image source={{ uri: creator.cover }} style={StyleSheet.absoluteFill} contentFit="cover" />
-                ) : <View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.ink }]} />}
-                <LinearGradient colors={["transparent", "rgba(8,8,10,0.95)"]} style={StyleSheet.absoluteFill} />
-                <View style={styles.clipBadge}>
-                  <Scissors size={11} color={Colors.ink} />
-                  <Text style={styles.clipBadgeText}>CLIP</Text>
-                </View>
-                <View style={styles.clipBody}>
-                  <Text style={styles.clipLabel} numberOfLines={2}>
-                    {c.label}
-                  </Text>
-                  <View style={styles.rowGap4}>
-                    <Users size={10} color={Colors.textDim} />
-                    <Text style={styles.clipViews}>{formatCount(c.views)}</Text>
-                  </View>
-                </View>
-              </View>
-            </PressableScale>
-          );
-        })}
-      </ScrollView>
-
-      <SectionHeader kicker="Set a reminder" title="Scheduled POVs" />
-      <View style={styles.schedWrap}>
-        {SCHEDULED.map((item) => {
-          const s = item as unknown as { id: string; creatorId: string; title: string; when: string; access: string };
-          const creator = getCreator(s.creatorId);
-          return (
-            <PressableScale key={s.id} scaleTo={0.98} onPress={() => router.push(`/creator/${s.creatorId}`)}>
-              <View style={styles.schedRow}>
-                <View style={styles.schedWhen}>
-                  <Calendar size={13} color={Colors.lime} />
-                  <Text style={styles.schedWhenText}>{s.when}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.schedTitle} numberOfLines={1}>
-                    {s.title}
-                  </Text>
-                  <Text style={styles.schedSub}>
-                    @{creator?.handle ?? "creator"} · {s.access}
-                  </Text>
-                </View>
-              </View>
-            </PressableScale>
-          );
-        })}
-      </View>
+      {streams.length === 0 ? (
+        <EmptyState
+          icon={<Radio size={24} color={Colors.magenta} />}
+          title={category === "all" ? "Nobody is live right now" : "Nothing live in this category"}
+          body={
+            category === "all"
+              ? "Streams appear here the second a creator goes live. Explore creators and turn on notifications so you never miss one."
+              : "Try another lifestyle filter, or browse all channels."
+          }
+          action={category === "all" ? "Explore creators" : "Show all channels"}
+          onAction={() =>
+            category === "all" ? router.push("/explore") : setCategory("all")
+          }
+        />
+      ) : (
+        <View style={styles.grid}>
+          {streams.map((s) => (
+            <View key={s.id} style={styles.gridItem}>
+              <LiveStreamCard stream={s} wide />
+            </View>
+          ))}
+        </View>
+      )}
 
       <View style={styles.creatorPromo}>
         <Text style={styles.promoKicker}>For creators</Text>
@@ -249,54 +205,7 @@ const styles = StyleSheet.create({
   chipRail: { paddingHorizontal: 18, gap: 8, paddingTop: 22 },
   grid: { paddingHorizontal: 14, gap: 14 },
   gridItem: { width: "100%" },
-  rail: { paddingHorizontal: 18, gap: 12 },
   rowCenter: { flexDirection: "row", alignItems: "center" },
-  rowGap4: { flexDirection: "row", alignItems: "center", gap: 4 },
-  clip: {
-    width: 140,
-    height: 210,
-    borderRadius: Radius.md,
-    overflow: "hidden",
-    backgroundColor: Colors.surface,
-    justifyContent: "flex-end",
-  },
-  clipBadge: {
-    position: "absolute",
-    top: 9,
-    left: 9,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: Colors.lime,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  clipBadgeText: { color: Colors.ink, ...microLabel, fontSize: 9 },
-  clipBody: { padding: 11, gap: 5 },
-  clipLabel: { color: Colors.text, fontSize: 12.5, fontWeight: "800", lineHeight: 16 },
-  clipViews: { color: Colors.textDim, fontSize: 10.5, fontWeight: "700" },
-  schedWrap: {
-    marginHorizontal: 18,
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    overflow: "hidden",
-  },
-  schedRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
-  schedWhen: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: "rgba(204,255,0,0.1)",
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  schedWhenText: { color: Colors.lime, fontSize: 11.5, fontWeight: "900" },
-  schedTitle: { color: Colors.text, fontSize: 13.5, fontWeight: "800" },
-  schedSub: { color: Colors.textDim, fontSize: 11.5, fontWeight: "600", marginTop: 2 },
   creatorPromo: {
     margin: 18,
     marginTop: 28,

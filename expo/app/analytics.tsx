@@ -3,10 +3,11 @@ import { ScrollView, StyleSheet, Text, View, ActivityIndicator } from "react-nat
 import { Image } from "expo-image";
 import { ArrowUpRight, Globe2, Repeat } from "lucide-react-native";
 
-import { Chip, PressableScale, ProgressBar, SectionHeader, StatTile } from "@/components/ui";
+import { Chip, ProgressBar, SectionHeader, StatTile } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import { formatCount, formatMoney } from "@/constants/mock-data";
 import { fetchCreatorAnalytics, type CreatorAnalytics } from "@/hooks/useAnalytics";
+import { useAuth } from "@/hooks/useAuth";
 
 type Range = "7d" | "30d" | "90d";
 
@@ -21,22 +22,33 @@ const GEOS = [
 const RETENTION = [1, 0.86, 0.79, 0.71, 0.66, 0.62];
 
 export default function AnalyticsScreen() {
+  const { user } = useAuth();
   const [range, setRange] = useState<Range>("30d");
   const [analytics, setAnalytics] = useState<CreatorAnalytics | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState<number>(0);
 
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
+    setLoadError(null);
     const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
-    fetchCreatorAnalytics(days).then((data) => {
-      if (!cancelled) {
-        setAnalytics(data);
-        setIsLoading(false);
-      }
-    });
+    fetchCreatorAnalytics(days, user?.id)
+      .then((data) => {
+        if (!cancelled) {
+          setAnalytics(data);
+          setIsLoading(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setLoadError(err instanceof Error ? err.message : "Could not load analytics");
+          setIsLoading(false);
+        }
+      });
     return () => { cancelled = true; };
-  }, [range]);
+  }, [range, user?.id, retryTick]);
 
   const bars = useMemo(() => {
     if (!analytics || analytics.revenueTrend.length === 0) {
@@ -53,6 +65,20 @@ export default function AnalyticsScreen() {
         <Text style={{ color: Colors.textDim, fontSize: 13, fontWeight: "600", marginTop: 12 }}>
           Loading your analytics…
         </Text>
+      </View>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <View style={[styles.screen, { alignItems: "center", justifyContent: "center", padding: 24 }]}>
+        <Text style={{ color: Colors.text, fontSize: 16, fontWeight: "800", textAlign: "center" }}>
+          Couldn&apos;t load analytics
+        </Text>
+        <Text style={{ color: Colors.textDim, fontSize: 13, fontWeight: "600", textAlign: "center", marginBottom: 16, marginTop: 8 }}>
+          {loadError}
+        </Text>
+        <Chip label="Retry" onPress={() => setRetryTick((t) => t + 1)} active />
       </View>
     );
   }

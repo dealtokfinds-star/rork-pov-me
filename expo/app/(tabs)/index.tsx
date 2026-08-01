@@ -8,7 +8,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CreatorCard, EpisodeCard, LiveStreamCard } from "@/components/cards";
 import {
-  Avatar,
   Button,
   Chip,
   EmptyState,
@@ -18,6 +17,7 @@ import {
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import { CATEGORIES, formatMoney } from "@/constants/mock-data";
 import { useCreators, useEpisodes, useStreams } from "@/lib/data";
+import { useNotifications } from "@/hooks/useNotifications";
 import { useApp } from "@/providers/app-provider";
 import type { Episode, PovCategory } from "@/types";
 
@@ -33,6 +33,7 @@ export default function FeedScreen() {
   const { data: streamsData } = useStreams();
   const { data: episodesData } = useEpisodes();
   const { data: creatorsData } = useCreators();
+  const { unreadCount } = useNotifications();
 
   const liveNow = useMemo(() => (streamsData ?? []).filter((s) => s.viewers > 0), [streamsData]);
   const allEpisodes = episodesData ?? [];
@@ -88,7 +89,7 @@ export default function FeedScreen() {
               <PressableScale onPress={() => router.push("/notifications")} scaleTo={0.9}>
                 <View style={styles.iconCircle}>
                   <Bell size={17} color={Colors.textMid} />
-                  <View style={styles.dot} />
+                  {unreadCount > 0 ? <View style={styles.dot} /> : null}
                 </View>
               </PressableScale>
             </View>

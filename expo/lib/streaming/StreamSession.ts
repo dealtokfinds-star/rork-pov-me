@@ -62,12 +62,7 @@ const INITIAL_STATE: StreamSessionState = {
   reconnectAttempts: 0,
 };
 
-/**
- * Simulated network drop interval for demoing the reconnect flow.
- * In production this would be driven by an RTMP/WebRTC transport layer.
- */
-const SIM_NET_DROP_MS = 45_000;
-const SIM_HEARTBEAT_MS = 1_000;
+const HEARTBEAT_MS = 1_000;
 const MAX_RECONNECT_ATTEMPTS = 5;
 
 export interface CameraController {
@@ -85,8 +80,6 @@ export interface CameraController {
 export interface StreamSessionOptions {
   /** Called when the local recording finalizes — host can upload as replay. */
   onRecordingComplete?: (uri: string) => void;
-  /** Simulate periodic network drops (disabled in production). */
-  simulateNetworkDrops?: boolean;
   /** Initial viewer count. */
   initialViewers?: number;
 }
@@ -100,7 +93,6 @@ export class StreamSession {
   private state: StreamSessionState = INITIAL_STATE;
   private listeners = new Set<Listener>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  private netDropTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private camera: CameraController | null = null;
   private recordingPromise: Promise<{ uri: string } | undefined> | null = null;
@@ -109,7 +101,6 @@ export class StreamSession {
 
   constructor(opts: StreamSessionOptions = {}) {
     this.opts = {
-      simulateNetworkDrops: true,
       initialViewers: 0,
       ...opts,
     };
@@ -189,7 +180,6 @@ export class StreamSession {
 
     this.setState({ health: "live" });
     this.startHeartbeat();
-    if (this.opts.simulateNetworkDrops) this.startNetDropSim();
   };
 
   /**
@@ -267,38 +257,26 @@ export class StreamSession {
   private startHeartbeat = (): void => {
     this.heartbeatTimer = setInterval(() => {
       if (this.disposed || this.state.health !== "live") return;
-      const m = this.state.metrics;
-      // Simulate viewer churn + a stable bitrate.
-      const viewerDelta = Math.floor(Math.random() * 60) - 22;
-      const newViewers = Math.max(8, m.viewers + viewerDelta);
-      const bitrate = 5800 + Math.floor(Math.random() * 900);
-      const dropped = Math.max(0, m.droppedFramesPct + (Math.random() - 0.55) * 0.4);
-      this.setMetrics({
-        elapsedSec: m.elapsedSec + 1,
-        viewers: newViewers,
-        bitrateKbps: bitrate,
-        droppedFramesPct: Math.min(dropped, 5),
-      });
-    }, SIM_HEARTBEAT_MS);
+      // Only the elapsed clock ticks locally — viewers/bitrate/dropped frames
+      // are real values pushed in via reportHealthMetrics() from the
+      // stream-health poller. No simulated churn.
+      this.setMetrics({ elapsedSec: this.state.metrics.elapsedSec + 1 });
+    }, HEARTBEAT_MS);
   };
 
-  private startNetDropSim = (): void => {
-    this.netDropTimer = setInterval(() => {
-      if (this.disposed || this.state.health !== "live") return;
-      // ~2.2% chance per tick to simulate a drop — rare enough not to annoy.
-      if (Math.random() > 0.978) {
-        this.handleNetworkDrop();
-      }
-    }, SIM_NET_DROP_MS);
+  /** Push real transport metrics (from the stream-health edge function). */
+  reportHealthMetrics = (patch: Partial<Pick<StreamMetrics, "viewers" | "bitrateKbps" | "droppedFramesPct">>): void => {
+    this.setMetrics(patch);
   };
 
   /**
-   * Edge case: sudden network drop mid-stream.
+   * Edge case: sudden network drop mid-stream (reported by the transport
+   * layer / health poller — never simulated).
    * Strategy: mark `reconnecting`, pause the camera preview to save battery,
    * then retry with exponential backoff up to MAX_RECONNECT_ATTEMPTS.
    * If all attempts fail, end the stream and surface the error.
    */
-  private handleNetworkDrop = async (): Promise<void> => {
+  handleNetworkDrop = async (): Promise<void> => {
     if (this.disposed) return;
     this.clearReconnectTimer();
     this.setState({
@@ -336,20 +314,15 @@ export class StreamSession {
 
     this.reconnectTimer = setTimeout(async () => {
       if (this.disposed) return;
-      // Simulated reconnect success — in production this would be a
-      // transport-level handshake. 80% chance of success per attempt.
-      if (Math.random() < 0.8) {
-        try {
-          await this.camera?.resumePreview?.();
-        } catch (err) {
-          console.log("[povme] resumePreview failed", err);
-        }
+      try {
+        await this.camera?.resumePreview?.();
         this.setState({
           health: "live",
           error: null,
           reconnectAttempts: 0,
         });
-      } else {
+      } catch (err) {
+        console.log("[povme] resumePreview failed — retrying", err);
         this.attemptReconnect();
       }
     }, delay);
@@ -368,10 +341,6 @@ export class StreamSession {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
-    }
-    if (this.netDropTimer) {
-      clearInterval(this.netDropTimer);
-      this.netDropTimer = null;
     }
     this.clearReconnectTimer();
   };

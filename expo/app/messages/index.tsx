@@ -1,7 +1,7 @@
 import { useRouter } from "expo-router";
-import { Inbox, Lock, Search } from "lucide-react-native";
-import React, { useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Inbox, Lock, Search, X } from "lucide-react-native";
+import React, { useMemo, useState } from "react";
+import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { Avatar, Chip, EmptyState, PressableScale, Tag } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
@@ -14,21 +14,47 @@ export default function MessagesScreen() {
   const { threads, isLoading } = useDmThreads();
   const { account } = useProfile();
   const [filter, setFilter] = useState<"all" | "unread" | "paid">("all");
+  const [query, setQuery] = useState<string>("");
 
   const myId = account?.id ?? "";
 
-  const filtered = threads.filter((t) => {
-    const unread = (t.creator_id === myId ? t.creator_unread_count : t.fan_unread_count) > 0;
-    if (filter === "unread") return unread;
-    if (filter === "paid") return t.last_is_paid === true;
-    return true;
-  });
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return threads.filter((t) => {
+      const unread = (t.creator_id === myId ? t.creator_unread_count : t.fan_unread_count) > 0;
+      if (filter === "unread" && !unread) return false;
+      if (filter === "paid" && t.last_is_paid !== true) return false;
+      if (q.length > 0) {
+        const haystack = `${t.other_name ?? ""} ${t.other_handle ?? ""} ${t.last_text ?? ""}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [threads, filter, query, myId]);
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={{ paddingBottom: 40 }}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+    >
       <View style={styles.searchBox}>
         <Search size={16} color={Colors.textDim} />
-        <Text style={styles.searchText}>Search messages</Text>
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search messages"
+          placeholderTextColor={Colors.textDim}
+          style={styles.searchInput}
+          autoCorrect={false}
+          returnKeyType="search"
+        />
+        {query.length > 0 ? (
+          <PressableScale onPress={() => setQuery("")} scaleTo={0.85}>
+            <X size={16} color={Colors.textMid} />
+          </PressableScale>
+        ) : null}
       </View>
 
       <View style={styles.filterRow}>
@@ -40,13 +66,23 @@ export default function MessagesScreen() {
       {isLoading ? (
         <Text style={styles.loading}>Loading conversations…</Text>
       ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={<Inbox size={22} color={Colors.textMid} />}
-          title="No conversations yet"
-          body="Direct messages open up with creators you subscribe to. Say hi, request a POV, or ask for a custom episode."
-          action="Find creators"
-          onAction={() => router.push("/(tabs)/explore")}
-        />
+        query.trim().length > 0 ? (
+          <EmptyState
+            icon={<Search size={22} color={Colors.textMid} />}
+            title="No matches"
+            body={`Nothing matches "${query.trim()}". Try a name, handle, or message text.`}
+            action="Clear search"
+            onAction={() => setQuery("")}
+          />
+        ) : (
+          <EmptyState
+            icon={<Inbox size={22} color={Colors.textMid} />}
+            title="No conversations yet"
+            body="Direct messages open up with creators you subscribe to. Say hi, request a POV, or ask for a custom episode."
+            action="Find creators"
+            onAction={() => router.push("/(tabs)/explore")}
+          />
+        )
       ) : (
         <View style={{ paddingHorizontal: 18, gap: 9 }}>
           {filtered.map((thread) => {
@@ -114,7 +150,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  searchText: { color: Colors.textDim, fontSize: 14, fontWeight: "600" },
+  searchInput: { flex: 1, color: Colors.text, fontSize: 14, fontWeight: "600" },
   filterRow: { flexDirection: "row", gap: 8, paddingHorizontal: 18, paddingVertical: 14 },
   loading: { color: Colors.textDim, fontSize: 13, fontWeight: "600", padding: 24 },
   row: {

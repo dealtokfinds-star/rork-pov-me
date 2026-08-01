@@ -1,8 +1,9 @@
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { Lock, Send, Sparkles } from "lucide-react-native";
-import React, { useEffect, useState } from "react";
+import { Lock, Send } from "lucide-react-native";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -22,24 +23,35 @@ export default function ThreadScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { account } = useProfile();
-  const { messages, isLoading, sendMessage } = useDmThread(id ?? null);
+  const { messages, thread, isLoading, sendMessage, markRead } = useDmThread(id ?? null);
 
   const [draft, setDraft] = useState<string>("");
   const [sending, setSending] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   const myId = account?.id ?? "";
+  const scrollRef = useRef<ScrollView>(null);
 
-  // Determine the recipient: the other party in the thread.
-  // We can infer from the first message where sender_id !== myId, or
-  // from the profile: if I'm the creator, recipient is the fan, and vice versa.
-  const recipientId = messages.find((m) => m.sender_id !== myId)?.sender_id
-    ?? messages.find((m) => m.sender_id === myId)?.sender_id
-    ?? "";
+  // The recipient is the other party on the thread row — works even for
+  // brand-new threads with zero messages.
+  const recipientId = thread
+    ? (thread.creator_id === myId ? thread.fan_id : thread.creator_id)
+    : "";
+
+  // Clear my unread count when the thread opens.
+  useEffect(() => {
+    if (thread && myId) {
+      void markRead(thread, myId);
+    }
+  }, [thread, myId, markRead]);
 
   const send = async (): Promise<void> => {
     const text = draft.trim();
-    if (text.length === 0 || !recipientId) return;
+    if (text.length === 0) return;
+    if (!recipientId) {
+      setError("Could not identify the recipient for this conversation.");
+      return;
+    }
     setSending(true);
     setError(null);
     const result = await sendMessage(recipientId, text);
@@ -53,11 +65,18 @@ export default function ThreadScreen() {
   };
 
   const unlock = (message: DmMessageRow): void => {
-    // Paid DM unlock: route to the tip/checkout flow with the message price.
-    // The stripe-webhook will update unlocked_by_recipient on the dm_messages row
-    // via a checkout metadata field. For now, surface the price.
-    setError(`Unlock paid messages via the checkout flow. Price: ${formatMoney(message.price)}.`);
+    // Paid DM unlocks settle through the creator checkout flow. Until the
+    // dedicated unlock product ships, route support to the creator's tip page
+    // and be explicit about the price rather than leaving a dead button.
     haptic("light");
+    Alert.alert(
+      "Paid message",
+      `This message unlocks for ${formatMoney(message.price)}. Paid message checkout is coming soon — you can support the creator with a tip in the meantime.`,
+      [
+        { text: "Not now", style: "cancel" },
+        { text: "Send a tip", onPress: () => router.push(`/tip/${recipientId}`) },
+      ],
+    );
   };
 
   if (isLoading) {
@@ -73,7 +92,12 @@ export default function ThreadScreen() {
     <View style={styles.screen}>
       <Stack.Screen options={{ title: "Direct message" }} />
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={{ padding: 16, gap: 12 }}
+          showsVerticalScrollIndicator={false}
+          onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+        >
           {messages.length === 0 ? (
             <Text style={styles.empty}>No messages yet — say hi 👋</Text>
           ) : null}

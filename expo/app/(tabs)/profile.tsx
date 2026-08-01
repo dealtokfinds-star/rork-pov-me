@@ -6,7 +6,6 @@ import {
   Bookmark,
   ChevronRight,
   CreditCard,
-  Heart,
   Inbox,
   LogOut,
   Radio,

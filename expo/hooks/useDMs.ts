@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 
+import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/lib/supabase";
 import { callEdge } from "@/lib/edge";
 
@@ -48,6 +49,8 @@ export interface DmThreadWithProfile extends DmThreadRow {
 
 /** List all DM threads for the signed-in user, with the other party's profile info. */
 export function useDmThreads() {
+  const { user } = useAuth();
+  const myId = user?.id ?? null;
   const [threads, setThreads] = useState<DmThreadWithProfile[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -98,17 +101,16 @@ export function useDmThreads() {
       }
     }
 
-    // Determine "other" party — we don't know our own id here, so mark both.
-    // The caller will use unread counts to figure out which side they're on.
+    // The "other" party is whichever side of the thread isn't the signed-in
+    // user — a creator sees the fan, a fan sees the creator.
     const enriched: DmThreadWithProfile[] = data.map((t: DmThreadRow) => {
-      // We need our user id to pick the "other" party. Fetch from profiles via RLS.
-      // For now, expose both and let the screen decide. We'll attach creator info.
-      const creatorP = profileMap.get(t.creator_id);
+      const otherId = myId && t.creator_id === myId ? t.fan_id : t.creator_id;
+      const otherP = profileMap.get(otherId);
       return {
         ...t,
-        other_name: creatorP?.name ?? null,
-        other_avatar: creatorP?.avatar_url ?? null,
-        other_handle: creatorP?.handle ?? null,
+        other_name: otherP?.name ?? null,
+        other_avatar: otherP?.avatar_url ?? null,
+        other_handle: otherP?.handle ?? null,
         last_text: lastMsgMap.get(t.id)?.text ?? null,
         last_is_paid: lastMsgMap.get(t.id)?.is_paid ?? null,
         last_price: lastMsgMap.get(t.id)?.price ?? null,
@@ -118,7 +120,7 @@ export function useDmThreads() {
 
     setThreads(enriched);
     setIsLoading(false);
-  }, []);
+  }, [myId]);
 
   useEffect(() => {
     loadThreads();
@@ -148,6 +150,7 @@ export function useDmThreads() {
 /** Realtime messages for a single thread. */
 export function useDmThread(threadId: string | null) {
   const [messages, setMessages] = useState<DmMessageRow[]>([]);
+  const [thread, setThread] = useState<DmThreadRow | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
@@ -157,14 +160,21 @@ export function useDmThread(threadId: string | null) {
     let cancelled = false;
 
     (async () => {
-      const { data, error } = await supabase
-        .from("dm_messages")
-        .select("*")
-        .eq("thread_id", threadId)
-        .order("created_at", { ascending: true });
+      // Load the thread row (identifies both parties) and its messages together.
+      const [threadResult, messagesResult] = await Promise.all([
+        supabase.from("dm_threads").select("*").eq("id", threadId).maybeSingle(),
+        supabase
+          .from("dm_messages")
+          .select("*")
+          .eq("thread_id", threadId)
+          .order("created_at", { ascending: true }),
+      ]);
 
-      if (!cancelled && !error && data) {
-        setMessages(data as DmMessageRow[]);
+      if (!cancelled && !threadResult.error && threadResult.data) {
+        setThread(threadResult.data as DmThreadRow);
+      }
+      if (!cancelled && !messagesResult.error && messagesResult.data) {
+        setMessages(messagesResult.data as DmMessageRow[]);
       }
       if (!cancelled) setIsLoading(false);
     })();
@@ -220,13 +230,14 @@ export function useDmThread(threadId: string | null) {
   );
 
   /** Mark thread as read (clear unread count for the current user's side). */
-  const markRead = useCallback(async (thread: DmThreadRow, myUserId: string) => {
+  const markRead = useCallback(async (t: DmThreadRow, myUserId: string) => {
     const updates: Record<string, number> = {};
-    if (thread.creator_id === myUserId) updates.creator_unread_count = 0;
-    if (thread.fan_id === myUserId) updates.fan_unread_count = 0;
+    if (t.creator_id === myUserId) updates.creator_unread_count = 0;
+    if (t.fan_id === myUserId) updates.fan_unread_count = 0;
     if (Object.keys(updates).length === 0) return;
-    await supabase.from("dm_threads").update(updates).eq("id", thread.id);
+    const { error } = await supabase.from("dm_threads").update(updates).eq("id", t.id);
+    if (error) console.log("[povme] markRead failed:", error.message);
   }, []);
 
-  return { messages, isLoading, sendMessage, markRead };
+  return { messages, thread, isLoading, sendMessage, markRead };
 }

@@ -106,15 +106,22 @@ export interface CreatorAnalytics {
 }
 
 /** Fetch aggregated analytics for the signed-in creator. */
-export async function fetchCreatorAnalytics(rangeDays = 30): Promise<CreatorAnalytics | null> {
+export async function fetchCreatorAnalytics(
+  rangeDays = 30,
+  userId?: string | null,
+): Promise<CreatorAnalytics | null> {
+  if (!userId) return null;
   const since = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000).toISOString();
 
-  // Get the creator's own profile id
-  const { data: profile } = await supabase
+  // Get the creator's own profile row (id-filtered — profiles are publicly
+  // readable, so an unfiltered maybeSingle() fails with multiple rows).
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("id, is_creator")
+    .eq("id", userId)
     .maybeSingle();
 
+  if (profileError) throw profileError;
   if (!profile?.is_creator) return null;
   const creatorId = profile.id;
 
@@ -131,7 +138,7 @@ export async function fetchCreatorAnalytics(rangeDays = 30): Promise<CreatorAnal
     supabase.from("events").select("id", { count: "exact", head: true }).eq("creator_id", creatorId).eq("kind", "view").gte("created_at", since),
     supabase.from("subscriptions").select("id", { count: "exact", head: true }).eq("creator_id", creatorId).eq("active", true),
     supabase.from("tips").select("amount").eq("creator_id", creatorId).gte("created_at", since),
-    supabase.from("unlocks").select("price").or(`episode_id.not.is.null,stream_id.not.is.null`).eq("fan_id", creatorId),
+    supabase.from("unlocks").select("price").eq("creator_id", creatorId).eq("status", "completed"),
     supabase.from("transactions").select("amount, platform_fee, creator_payout").eq("creator_id", creatorId).eq("status", "completed").gte("created_at", since),
     supabase.from("creator_revenue_daily").select("day, sub_revenue, ppv_revenue, tip_revenue").eq("creator_id", creatorId).gte("day", since).order("day", { ascending: true }),
     supabase.from("episode_performance").select("episode_id, total_views, total_unlocks, total_tips, total_likes").eq("creator_id", creatorId).order("total_views", { ascending: false }).limit(5),
@@ -147,7 +154,7 @@ export async function fetchCreatorAnalytics(rangeDays = 30): Promise<CreatorAnal
 
   // Fetch episode titles/thumbnails for top episodes
   const topEpIds = (topEpsResult.data ?? []).map((e) => e.episode_id);
-  let episodeMeta: Record<string, { title: string; thumb_url: string | null }> = {};
+  const episodeMeta: Record<string, { title: string; thumb_url: string | null }> = {};
   if (topEpIds.length > 0) {
     const { data: eps } = await supabase.from("episodes").select("id, title, thumb_url").in("id", topEpIds);
     for (const e of eps ?? []) {

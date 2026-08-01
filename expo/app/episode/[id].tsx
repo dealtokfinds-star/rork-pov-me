@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import {
   Bookmark,
+  Check,
   ChevronLeft,
   Eye,
   Heart,
@@ -13,12 +14,12 @@ import {
   Share2,
   Sparkles,
 } from "lucide-react-native";
-import React, { useMemo } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import { ActivityIndicator, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { EpisodeTile } from "@/components/cards";
-import { Avatar, Button, PressableScale, SectionHeader, Tag } from "@/components/ui";
+import { Avatar, Button, PressableScale, SectionHeader, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import {
   categoryById,
@@ -27,13 +28,16 @@ import {
   formatMoney,
 } from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
+import { useAuth } from "@/hooks/useAuth";
 import { useCreator, useEpisode, useEpisodes } from "@/lib/data";
 import { useEpisodeAccess } from "@/hooks/useAccess";
+import { callEdge } from "@/lib/edge";
 
 export default function EpisodeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { user } = useAuth();
   const {
     isSubscribed,
     toggleSaved,
@@ -45,6 +49,44 @@ export default function EpisodeScreen() {
   const { data: episode, isLoading } = useEpisode(id ?? "");
   const { data: creator } = useCreator(episode?.creatorId);
   const { data: allEpisodes = [] } = useEpisodes();
+
+  const [comment, setComment] = useState<string>("");
+  const [commentState, setCommentState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [commentError, setCommentError] = useState<string | null>(null);
+
+  const handleShare = useCallback(async (): Promise<void> => {
+    if (!episode) return;
+    try {
+      await Share.share({
+        message: `Step into this POV on povme — "${episode.title}"`,
+        title: episode.title,
+      });
+    } catch (err) {
+      console.log("[povme] share failed", err);
+    }
+  }, [episode]);
+
+  const sendComment = useCallback(async (): Promise<void> => {
+    const text = comment.trim();
+    if (text.length === 0 || !episode || !creator) return;
+    setCommentState("sending");
+    setCommentError(null);
+    try {
+      await callEdge("dm-send", {
+        recipient_id: creator.id,
+        text: `About “${episode.title}”: ${text}`,
+        is_paid: false,
+        price: 0,
+      });
+      setComment("");
+      setCommentState("sent");
+      haptic("success");
+      setTimeout(() => setCommentState("idle"), 2500);
+    } catch (err) {
+      setCommentState("error");
+      setCommentError(err instanceof Error ? err.message : "Could not send your message");
+    }
+  }, [comment, episode, creator]);
 
   // Server-enforced access check — the edge function checks subscription/
   // unlock rows and returns the video URL only if access is granted.
@@ -68,8 +110,9 @@ export default function EpisodeScreen() {
 
   if (isLoading || accessLoading) {
     return (
-      <View style={[styles.screen, { alignItems: "center", justifyContent: "center" }]}>
-        <Text style={{ color: Colors.textMid, fontSize: 14, fontWeight: 700 }}>Loading…</Text>
+      <View style={[styles.screen, { alignItems: "center", justifyContent: "center", gap: 12 }]}>
+        <ActivityIndicator color={Colors.lime} />
+        <Text style={{ color: Colors.textMid, fontSize: 14, fontWeight: "700" }}>Loading episode…</Text>
       </View>
     );
   }
@@ -211,7 +254,11 @@ export default function EpisodeScreen() {
               label="Tip"
               onPress={() => router.push(`/tip/${creator.id}`)}
             />
-            <ActionPill icon={<Share2 size={16} color={Colors.textMid} />} label="Share" />
+            <ActionPill
+              icon={<Share2 size={16} color={Colors.textMid} />}
+              label="Share"
+              onPress={() => void handleShare()}
+            />
           </View>
 
           <View style={styles.creatorCard}>
@@ -254,15 +301,43 @@ export default function EpisodeScreen() {
           </View>
 
           <View style={styles.commentBox}>
-            <Avatar
-              uri="https://images.unsplash.com/photo-1547425260-76bcadfb4f2c?auto=format&fit=crop&w=200&q=80"
-              size={32}
+            <Avatar uri={user?.picture ?? ""} size={32} />
+            <TextInput
+              value={comment}
+              onChangeText={(t) => {
+                setComment(t);
+                if (commentState === "error") setCommentState("idle");
+              }}
+              placeholder={`Say something to ${creator.name.split(" ")[0]}…`}
+              placeholderTextColor={Colors.textDim}
+              style={styles.commentInput}
+              editable={commentState !== "sending"}
+              onSubmitEditing={() => void sendComment()}
+              returnKeyType="send"
+              maxLength={280}
             />
-            <Text style={styles.commentPlaceholder}>Say something to {creator.name.split(" ")[0]}…</Text>
-            <View style={styles.sendBtn}>
-              <Send size={14} color={Colors.ink} />
-            </View>
+            <PressableScale
+              onPress={() => void sendComment()}
+              scaleTo={0.85}
+              disabled={comment.trim().length === 0 || commentState === "sending"}
+            >
+              <View style={[styles.sendBtn, commentState === "sent" && { backgroundColor: Colors.success }]}>
+                {commentState === "sending" ? (
+                  <ActivityIndicator size="small" color={Colors.ink} />
+                ) : commentState === "sent" ? (
+                  <Check size={14} color={Colors.ink} />
+                ) : (
+                  <Send size={14} color={Colors.ink} />
+                )}
+              </View>
+            </PressableScale>
           </View>
+          {commentState === "sent" ? (
+            <Text style={styles.commentSent}>Sent — continue the conversation in Messages.</Text>
+          ) : null}
+          {commentState === "error" && commentError ? (
+            <Text style={styles.commentError}>{commentError}</Text>
+          ) : null}
         </View>
 
         {related.length > 0 ? (
@@ -396,7 +471,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  commentPlaceholder: { flex: 1, color: Colors.textDim, fontSize: 13, fontWeight: "600" },
+  commentInput: { flex: 1, color: Colors.text, fontSize: 13, fontWeight: "600", paddingVertical: 0 },
+  commentSent: { color: Colors.success, fontSize: 12, fontWeight: "700", marginTop: 8 },
+  commentError: { color: Colors.danger, fontSize: 12, fontWeight: "700", marginTop: 8 },
   sendBtn: {
     width: 32,
     height: 32,

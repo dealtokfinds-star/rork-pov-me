@@ -17,9 +17,24 @@ const PRICE_OPTIONS = [4.99, 7.99, 9.99, 12.99, 14.99, 19.99, 24.99, 29.99, 39.9
 export default function SettingsScreen() {
   const router = useRouter();
   const { user, signOut } = useAuth();
-  const { account } = useProfile();
-  const { token, permissionStatus, register } = usePushNotifications();
+  const { account, updateProfile, isUpdating } = useProfile();
+  const { permissionStatus, register } = usePushNotifications();
   const { isCreator, creatorPrice, setCreatorPrice, resetAccount, displayName, handle } = useApp();
+  const [priceError, setPriceError] = useState<string | null>(null);
+
+  /** Persist the new subscription price to the server, not just local state. */
+  const changePrice = async (p: number): Promise<void> => {
+    const previous = creatorPrice;
+    setCreatorPrice(p); // optimistic
+    setPriceError(null);
+    haptic("light");
+    try {
+      await updateProfile({ subPrice: p });
+    } catch (err) {
+      setCreatorPrice(previous); // roll back
+      setPriceError(err instanceof Error ? err.message : "Could not save the new price");
+    }
+  };
   const [pushLive, setPushLive] = useState<boolean>(true);
   const [pushDrops, setPushDrops] = useState<boolean>(true);
   const [pushDms, setPushDms] = useState<boolean>(true);
@@ -53,15 +68,15 @@ export default function SettingsScreen() {
                   key={p}
                   label={`$${p}`}
                   active={creatorPrice === p}
-                  onPress={() => {
-                    setCreatorPrice(p);
-                    haptic("light");
-                  }}
+                  onPress={() => void changePrice(p)}
                 />
               ))}
             </View>
+            {priceError ? <Text style={styles.priceError}>{priceError}</Text> : null}
             <Text style={styles.hint}>
-              Existing subscribers keep their current price until they resubscribe.
+              {isUpdating
+                ? "Saving your new price…"
+                : "Existing subscribers keep their current price until they resubscribe."}
             </Text>
           </View>
 
@@ -149,8 +164,9 @@ export default function SettingsScreen() {
       </View>
 
       <Button
-        label="Delete my account"
+        label={deleting ? "Deleting…" : "Delete my account"}
         variant="ghost"
+        disabled={deleting}
         icon={<Trash2 size={15} color={Colors.danger} />}
         onPress={() => {
           Alert.alert(
@@ -296,6 +312,7 @@ const styles = StyleSheet.create({
   },
   gdprLabel: { flex: 1, color: Colors.text, fontSize: 13, fontWeight: "800" },
   gdprMeta: { color: Colors.textDim, fontSize: 11, fontWeight: "700" },
+  priceError: { color: Colors.danger, fontSize: 12, fontWeight: "700" },
   version: {
     ...microLabel,
     color: Colors.textDim,

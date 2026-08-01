@@ -222,6 +222,31 @@ export const [AppProvider, useApp] = createContextHook(() => {
     [isSubscribed],
   );
 
+  // ─── Wallet refresh from server ────────────────────────────────────────────
+  const refreshWallet = useCallback(async (): Promise<void> => {
+    if (!user?.id) return;
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("wallet_balance, total_spent")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (error) {
+        console.log("[povme] refreshWallet failed:", error.message);
+        return;
+      }
+      if (data) {
+        setState((prev) => ({
+          ...prev,
+          balance: Number(data.wallet_balance ?? 0),
+          totalSpent: Number(data.total_spent ?? 0),
+        }));
+      }
+    } catch (err) {
+      console.log("[povme] refreshWallet failed", err);
+    }
+  }, [user?.id]);
+
   // ─── Stripe payments (real — webhook confirms) ─────────────────────────────
 
   const topUpViaStripe = useCallback(
@@ -234,7 +259,7 @@ export const [AppProvider, useApp] = createContextHook(() => {
       setTimeout(() => void refreshWallet(), 3000);
       return { success: true };
     },
-    [],
+    [refreshWallet],
   );
 
   const subscribeViaStripe = useCallback(
@@ -305,25 +330,6 @@ export const [AppProvider, useApp] = createContextHook(() => {
     },
     [queryClient],
   );
-
-  // ─── Wallet refresh from server ────────────────────────────────────────────
-  const refreshWallet = useCallback(async (): Promise<void> => {
-    try {
-      const { data } = await supabase
-        .from("profiles")
-        .select("wallet_balance, total_spent")
-        .maybeSingle();
-      if (data) {
-        setState((prev) => ({
-          ...prev,
-          balance: Number(data.wallet_balance ?? 0),
-          totalSpent: Number(data.total_spent ?? 0),
-        }));
-      }
-    } catch (err) {
-      console.log("[povme] refreshWallet failed", err);
-    }
-  }, []);
 
   // ─── Saves / Likes (delegated to server hooks) ─────────────────────────────
   const toggleSaved = useCallback(

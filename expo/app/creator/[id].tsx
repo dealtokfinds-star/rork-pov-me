@@ -46,7 +46,7 @@ export default function CreatorScreen() {
   if (isLoading) {
     return (
       <View style={[styles.screen, { alignItems: "center", justifyContent: "center" }]}>
-        <Text style={{ color: Colors.textMid, fontSize: 14, fontWeight: 700 }}>Loading…</Text>
+        <Text style={{ color: Colors.textMid, fontSize: 14, fontWeight: "700" }}>Loading…</Text>
       </View>
     );
   }
@@ -73,7 +73,7 @@ export default function CreatorScreen() {
         <View style={styles.cover}>
           <Image source={{ uri: creator.cover }} style={StyleSheet.absoluteFill} contentFit="cover" />
           <LinearGradient
-            colors=  {["rgba(8,8,10,0.45)", "rgba(8,8,10,0.55)", Colors.bg]}
+            colors={["rgba(8,8,10,0.45)", "rgba(8,8,10,0.55)", Colors.bg]}
             locations={[0, 0.55, 1]}
             style={StyleSheet.absoluteFill}
           />
