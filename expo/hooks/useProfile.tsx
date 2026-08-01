@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/lib/supabase";
-import type { PovCategory } from "@/types";
+import type { PovCategory, SocialLinks } from "@/types";
 
 /**
  * Account model — the signed-in user's row in `profiles`.
@@ -27,6 +27,7 @@ export interface Account {
   location: string | null;
   categories: PovCategory[] | null;
   interests: PovCategory[] | null;
+  socialLinks: SocialLinks;
   isCreator: boolean;
   isAdmin: boolean;
   onboarded: boolean;
@@ -56,6 +57,7 @@ type ProfileRow = {
   location: string | null;
   categories: string[] | null;
   interests: string[] | null;
+  social_links: Record<string, string> | null;
   is_creator: boolean | null;
   is_admin: boolean | null;
   onboarded: boolean | null;
@@ -85,6 +87,7 @@ function mapAccount(row: ProfileRow): Account {
     location: row.location,
     categories: (row.categories ?? []) as PovCategory[],
     interests: (row.interests ?? []) as PovCategory[],
+    socialLinks: (row.social_links ?? {}) as SocialLinks,
     isCreator: row.is_creator ?? false,
     isAdmin: row.is_admin ?? false,
     onboarded: row.onboarded ?? false,
@@ -103,7 +106,7 @@ function mapAccount(row: ProfileRow): Account {
 }
 
 const PROFILE_SELECT =
-  "id, email, name, handle, avatar_url, cover_url, bio, identity, location, categories, interests, is_creator, is_admin, onboarded, verified, sub_price, wallet_balance, total_spent, kyc_status, kyc_verified_at, stripe_account_id, stripe_account_status, stripe_payouts_enabled, created_at, updated_at";
+  "id, email, name, handle, avatar_url, cover_url, bio, identity, location, categories, interests, social_links, is_creator, is_admin, onboarded, verified, sub_price, wallet_balance, total_spent, kyc_status, kyc_verified_at, stripe_account_id, stripe_account_status, stripe_payouts_enabled, created_at, updated_at";
 
 async function fetchAccount(userId: string): Promise<Account | null> {
   const { data, error } = await supabase
@@ -146,6 +149,7 @@ export function useProfile() {
       if (input.location !== undefined) row.location = input.location;
       if (input.categories !== undefined) row.categories = input.categories;
       if (input.interests !== undefined) row.interests = input.interests;
+      if (input.socialLinks !== undefined) row.social_links = input.socialLinks;
       if (input.isCreator !== undefined) row.is_creator = input.isCreator;
       if (input.onboarded !== undefined) row.onboarded = input.onboarded;
       if (input.subPrice !== undefined) row.sub_price = input.subPrice;
@@ -168,6 +172,7 @@ export function useProfile() {
     onSuccess: (account) => {
       queryClient.setQueryData(["profile", "me", userId], account);
       queryClient.invalidateQueries({ queryKey: ["creator", account.id] });
+      queryClient.invalidateQueries({ queryKey: ["creators"] });
     },
   });
 
@@ -192,6 +197,7 @@ export interface AccountUpdateInput {
   location: string | null;
   categories: PovCategory[];
   interests: PovCategory[];
+  socialLinks: SocialLinks;
   isCreator: boolean;
   onboarded: boolean;
   subPrice: number;

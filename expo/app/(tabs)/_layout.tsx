@@ -5,8 +5,12 @@ import React from "react";
 import { Platform, StyleSheet, View } from "react-native";
 
 import Colors from "@/constants/colors";
+import { useLiveNow } from "@/hooks/useLiveNow";
 
 export default function TabLayout() {
+  // Realtime: keeps LIVE badges on creator cards/avatars in sync with the
+  // live_streams table without manual refreshes.
+  useLiveNow();
   return (
     <Tabs
       screenOptions={{

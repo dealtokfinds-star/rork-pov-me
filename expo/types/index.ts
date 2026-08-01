@@ -18,6 +18,15 @@ export interface Category {
   accent: string;
 }
 
+/** External social profiles a creator can attach to their POVMe profile. */
+export interface SocialLinks {
+  twitter?: string;
+  instagram?: string;
+  tiktok?: string;
+  youtube?: string;
+  website?: string;
+}
+
 export interface Creator {
   id: string;
   handle: string;
@@ -34,6 +43,7 @@ export interface Creator {
   verified: boolean;
   isLive: boolean;
   rating: number;
+  socialLinks: SocialLinks;
 }
 
 export interface Episode {

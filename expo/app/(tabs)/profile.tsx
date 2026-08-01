@@ -8,6 +8,7 @@ import {
   CreditCard,
   Inbox,
   LogOut,
+  Pencil,
   Radio,
   Shield,
   Sparkles,
@@ -23,6 +24,7 @@ import { Avatar, Button, PressableScale, SectionHeader, StatTile, Tag } from "@/
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import { formatMoney } from "@/constants/mock-data";
 import { useAuth } from "@/hooks/useAuth";
+import { useProfile } from "@/hooks/useProfile";
 import { useCreators, useEpisodes, useCreator } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
 
@@ -45,10 +47,14 @@ export default function ProfileScreen() {
 
   const { data: creatorsData = [] } = useCreators();
   const { data: episodesData = [] } = useEpisodes();
+  const { account } = useProfile();
 
-  const profileName = user?.name ?? displayName;
-  const profileHandle = user?.email?.split("@")[0] ?? handle;
-  const profileAvatar = user?.picture ?? "https://images.unsplash.com/photo-1547425260-76bcadfb4f2c?auto=format&fit=crop&w=300&q=80";
+  const profileName = account?.name ?? user?.name ?? displayName;
+  const profileHandle = account?.handle ?? user?.email?.split("@")[0] ?? handle;
+  const profileAvatar = account?.avatarUrl ?? user?.picture ?? "";
+  const profileCover =
+    account?.coverUrl ??
+    "https://images.unsplash.com/photo-1505761671935-60b3a7427bad?auto=format&fit=crop&w=900&q=80";
 
   const saved = episodesData.filter((e) => savedEpisodes.includes(e.id));
 
@@ -65,9 +71,7 @@ export default function ProfileScreen() {
     >
       <View style={styles.coverWrap}>
         <Image
-          source={{
-            uri: "https://images.unsplash.com/photo-1505761671935-60b3a7427bad?auto=format&fit=crop&w=900&q=80",
-          }}
+          source={{ uri: profileCover }}
           style={StyleSheet.absoluteFill}
           contentFit="cover"
         />
@@ -88,6 +92,12 @@ export default function ProfileScreen() {
             <Tag label={`${activeSubs.length} lives subscribed`} color={Colors.text} bg="rgba(255,255,255,0.1)" />
             <Tag label={`${savedEpisodes.length} POVs saved`} color={Colors.cyan} bg="rgba(53,231,255,0.12)" />
           </View>
+          <PressableScale onPress={() => router.push("/edit-profile")} scaleTo={0.94}>
+            <View style={styles.editPill}>
+              <Pencil size={13} color={Colors.ink} />
+              <Text style={styles.editPillText}>Edit profile</Text>
+            </View>
+          </PressableScale>
         </View>
       </View>
 
@@ -142,6 +152,7 @@ export default function ProfileScreen() {
 
       <SectionHeader kicker="Account" title="Settings" />
       <View style={styles.menu}>
+        <MenuRow icon={<Pencil size={17} color={Colors.lime} />} label="Edit profile & social links" onPress={() => router.push("/edit-profile")} />
         <MenuRow icon={<Wallet2 size={17} color={Colors.lime} />} label="Wallet & payment methods" onPress={() => router.push("/wallet")} />
         <MenuRow icon={<CreditCard size={17} color={Colors.textMid} />} label="Subscriptions & billing" onPress={() => router.push("/subscriptions")} />
         <MenuRow icon={<Bookmark size={17} color={Colors.textMid} />} label="Saved POVs" onPress={() => router.push("/saved")} />
@@ -229,6 +240,17 @@ const styles = StyleSheet.create({
   name: { color: Colors.text, fontSize: 24, fontWeight: "900", letterSpacing: -0.8, marginTop: 12 },
   handle: { color: Colors.textDim, fontSize: 13, fontWeight: "700", marginTop: 3 },
   badgeRow: { flexDirection: "row", gap: 6, marginTop: 14, flexWrap: "wrap", justifyContent: "center" },
+  editPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: Colors.lime,
+    paddingHorizontal: 14,
+    height: 34,
+    borderRadius: Radius.pill,
+    marginTop: 14,
+  },
+  editPillText: { color: Colors.ink, fontSize: 12.5, fontWeight: "900" },
   walletCard: {
     flexDirection: "row",
     alignItems: "center",

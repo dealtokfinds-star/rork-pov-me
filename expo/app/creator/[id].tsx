@@ -2,17 +2,22 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
+  AtSign,
   BadgeCheck,
   ChevronLeft,
+  Globe,
+  Instagram,
   MapPin,
   MessageCircle,
+  Music2,
   Radio,
   Sparkles,
   Star,
   Users,
+  Youtube,
 } from "lucide-react-native";
 import React, { useMemo, useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Linking, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { EpisodeCard, EpisodeTile, LiveStreamCard } from "@/components/cards";
@@ -25,8 +30,70 @@ import {
 } from "@/constants/mock-data";
 import { useCreator, useCreatorEpisodes, useStreams } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
+import type { SocialLinks } from "@/types";
 
 type Tab = "episodes" | "premium" | "about";
+
+interface SocialEntry {
+  key: string;
+  label: string;
+  url: string;
+  icon: React.ReactNode;
+}
+
+/** Normalize stored handles/urls into tappable external links. */
+function socialEntries(links: SocialLinks | undefined): SocialEntry[] {
+  if (!links) return [];
+  const clean = (v: string): string => v.trim().replace(/^@/, "");
+  const entries: SocialEntry[] = [];
+  if (links.twitter) {
+    const h = clean(links.twitter);
+    entries.push({
+      key: "twitter",
+      label: `@${h.split("/").pop() ?? h}`,
+      url: h.startsWith("http") ? h : `https://x.com/${h}`,
+      icon: <AtSign size={13} color={Colors.cyan} />,
+    });
+  }
+  if (links.instagram) {
+    const h = clean(links.instagram);
+    entries.push({
+      key: "instagram",
+      label: h.split("/").pop() ?? h,
+      url: h.startsWith("http") ? h : `https://instagram.com/${h}`,
+      icon: <Instagram size={13} color={Colors.magenta} />,
+    });
+  }
+  if (links.tiktok) {
+    const h = clean(links.tiktok);
+    entries.push({
+      key: "tiktok",
+      label: h.split("/").pop() ?? h,
+      url: h.startsWith("http") ? h : `https://tiktok.com/@${h}`,
+      icon: <Music2 size={13} color={Colors.text} />,
+    });
+  }
+  if (links.youtube) {
+    const h = clean(links.youtube);
+    entries.push({
+      key: "youtube",
+      label: h.split("/").pop() ?? h,
+      url: h.startsWith("http") ? h : `https://youtube.com/@${h}`,
+      icon: <Youtube size={13} color={Colors.danger} />,
+    });
+  }
+  if (links.website) {
+    const w = links.website.trim();
+    const url = w.startsWith("http") ? w : `https://${w}`;
+    entries.push({
+      key: "website",
+      label: url.replace(/^https?:\/\//, "").replace(/\/$/, ""),
+      url,
+      icon: <Globe size={13} color={Colors.lime} />,
+    });
+  }
+  return entries;
+}
 
 export default function CreatorScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -63,6 +130,7 @@ export default function CreatorScreen() {
   const subbed = isSubscribed(creator.id);
   const premium = episodes.filter((e) => e.access === "ppv");
   const free = episodes.filter((e) => e.access === "free");
+  const socials = socialEntries(creator.socialLinks);
 
   return (
     <View style={styles.screen}>
@@ -108,6 +176,29 @@ export default function CreatorScreen() {
           </View>
 
           <Text style={styles.bio}>{creator.bio}</Text>
+
+          {socials.length > 0 ? (
+            <View style={styles.socialRow}>
+              {socials.map((s) => (
+                <PressableScale
+                  key={s.key}
+                  scaleTo={0.93}
+                  onPress={() => {
+                    Linking.openURL(s.url).catch(() =>
+                      console.log("[povme] could not open", s.url),
+                    );
+                  }}
+                >
+                  <View style={styles.socialChip}>
+                    {s.icon}
+                    <Text style={styles.socialChipText} numberOfLines={1}>
+                      {s.label}
+                    </Text>
+                  </View>
+                </PressableScale>
+              ))}
+            </View>
+          ) : null}
 
           <View style={styles.metaRow}>
             <View style={styles.metaItem}>
@@ -271,6 +362,26 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 14,
   },
+  socialRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 14,
+    justifyContent: "center",
+  },
+  socialChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    maxWidth: 180,
+  },
+  socialChipText: { color: Colors.textMid, fontSize: 12, fontWeight: "700" },
   metaRow: { flexDirection: "row", gap: 18, marginTop: 14 },
   metaItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   metaText: { color: Colors.textDim, fontSize: 12, fontWeight: "700" },

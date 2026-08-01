@@ -38,7 +38,7 @@ export default function GoLiveScreen() {
   const [category, setCategory] = useState<PovCategory>("founder");
   const [access, setAccess] = useState<StreamAccess>("public");
   const [ppvPrice, setPpvPrice] = useState<number>(6.99);
-  const [source, setSource] = useState<Source>("chest");
+  const [source, setSource] = useState<Source>("phone");
   const [slowMode, setSlowMode] = useState<boolean>(true);
   const [replay, setReplay] = useState<boolean>(true);
   const [coHost, setCoHost] = useState<boolean>(false);
@@ -159,18 +159,18 @@ export default function GoLiveScreen() {
       <Text style={styles.label}>Camera source</Text>
       <View style={{ gap: 9 }}>
         <SourceOption
+          icon={<Smartphone size={17} color={source === "phone" ? Colors.ink : Colors.magenta} />}
+          title="This phone's camera"
+          body="Go live straight from this phone — camera, chat and viewers in one screen"
+          active={source === "phone"}
+          onPress={() => setSource("phone")}
+        />
+        <SourceOption
           icon={<Camera size={17} color={source === "chest" ? Colors.ink : Colors.magenta} />}
           title="Chest rig / action cam"
           body="RTMP key — GoPro, Insta360, glasses cam"
           active={source === "chest"}
           onPress={() => setSource("chest")}
-        />
-        <SourceOption
-          icon={<Smartphone size={17} color={source === "phone" ? Colors.ink : Colors.magenta} />}
-          title="This phone (monitor + encoder)"
-          body="RTMP key shown · phone is your monitor while an encoder broadcasts"
-          active={source === "phone"}
-          onPress={() => setSource("phone")}
         />
         <SourceOption
           icon={<Monitor size={17} color={source === "desktop" ? Colors.ink : Colors.magenta} />}
@@ -261,7 +261,7 @@ export default function GoLiveScreen() {
       ) : null}
 
       <Button
-        label={provisioning ? "Starting stream…" : "Go live now"}
+        label={provisioning ? "Setting up your stream…" : source === "phone" ? "Open camera & go live" : "Go live now"}
         variant="live"
         icon={provisioning ? <Loader size={17} color="#fff" /> : <Radio size={17} color="#fff" />}
         disabled={provisioning}

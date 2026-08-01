@@ -7,6 +7,7 @@ import type {
   Episode,
   LiveStream,
   PovCategory,
+  SocialLinks,
   StudioEpisode,
   StreamAccess,
 } from "@/types";
@@ -26,6 +27,7 @@ type ProfileRow = {
   identity: string | null;
   location: string | null;
   categories: string[] | null;
+  social_links: Record<string, string> | null;
   is_creator: boolean | null;
   verified: boolean | null;
   sub_price: number | null;
@@ -98,6 +100,7 @@ function mapCreator(row: ProfileRow, liveIds: Set<string>): Creator {
     verified: row.verified ?? false,
     isLive: liveIds.has(row.id),
     rating: 4.8,
+    socialLinks: (row.social_links ?? {}) as SocialLinks,
   };
 }
 
@@ -140,7 +143,7 @@ function mapStream(row: StreamRow): LiveStream {
 async function fetchCreators(): Promise<Creator[]> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, handle, name, avatar_url, cover_url, bio, identity, location, categories, is_creator, verified, sub_price, onboarded")
+    .select("id, handle, name, avatar_url, cover_url, bio, identity, location, categories, social_links, is_creator, verified, sub_price, onboarded")
     .eq("is_creator", true)
     .order("created_at", { ascending: true });
 
@@ -207,7 +210,7 @@ async function fetchEpisodeById(id: string): Promise<Episode | null> {
 async function fetchCreatorById(id: string): Promise<Creator | null> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, handle, name, avatar_url, cover_url, bio, identity, location, categories, is_creator, verified, sub_price, onboarded")
+    .select("id, handle, name, avatar_url, cover_url, bio, identity, location, categories, social_links, is_creator, verified, sub_price, onboarded")
     .eq("id", id)
     .maybeSingle();
 

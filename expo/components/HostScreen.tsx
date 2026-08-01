@@ -21,7 +21,6 @@
  *  - Health polling is cleared on unmount and on end.
  */
 
-import { CameraView } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import {
@@ -47,6 +46,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import PhoneBroadcast from "@/components/PhoneBroadcast";
 import { Button, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import { formatCount, formatMoney } from "@/constants/mock-data";
@@ -119,9 +119,10 @@ export default function HostScreen({
     return () => loop.stop();
   }, [healthState, pulse]);
 
-  // ---- real health polling ----
+  // ---- real health polling (encoder sources only — phone manages its own
+  // session state and Mux would report "idle" forever without RTMP) ----
   useEffect(() => {
-    if (!streamId) return;
+    if (!streamId || source === "phone") return;
     let cancelled = false;
 
     const poll = async (): Promise<void> => {
@@ -149,7 +150,7 @@ export default function HostScreen({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [streamId]);
+  }, [streamId, source]);
 
   // ---- copy RTMP key / URL ----
   const copyKey = useCallback(async (): Promise<void> => {
@@ -203,6 +204,21 @@ export default function HostScreen({
     );
   }
 
+  // ---- phone source: full-screen camera broadcast (the real "start stream") ----
+  if (source === "phone") {
+    return (
+      <PhoneBroadcast
+        title={title}
+        category={category}
+        access={access}
+        ppvPrice={ppvPrice}
+        streamId={streamId}
+        onExit={() => router.back()}
+        onEnded={() => onStreamEnded?.()}
+      />
+    );
+  }
+
   const mins = Math.floor(elapsedSec / 60);
   const secs = elapsedSec % 60;
   const isLive = healthState === "live";
@@ -251,7 +267,7 @@ export default function HostScreen({
             bg={access === "ppv" ? Colors.cyan : Colors.lime}
           />
           <Tag label={category.toUpperCase()} color={Colors.text} bg="rgba(0,0,0,0.55)" />
-          <Tag label={source === "chest" ? "CHEST RIG" : source === "phone" ? "PHONE" : "DESKTOP"} color={Colors.text} bg="rgba(0,0,0,0.55)" />
+          <Tag label={source === "chest" ? "CHEST RIG" : "DESKTOP"} color={Colors.text} bg="rgba(0,0,0,0.55)" />
         </View>
       </View>
 
@@ -297,9 +313,8 @@ export default function HostScreen({
               <Text style={styles.encoderTitle}>Connect your encoder</Text>
             </View>
             <Text style={styles.encoderHint}>
-              {source === "phone"
-                ? "Expo Go can't push RTMP — use this key in OBS / Streamlabs / your chest rig. This phone is your monitor."
-                : "Paste these into OBS, Streamlabs, or your chest rig's RTMP settings."}
+              Paste these into OBS, Streamlabs, or your chest rig&apos;s RTMP settings. The stream
+              goes live automatically when your encoder connects.
             </Text>
 
             <View style={styles.rtmpRow}>
@@ -335,27 +350,6 @@ export default function HostScreen({
             </View>
             <Text style={styles.rtmpNote}>Long-press to reveal · tap the copy icon</Text>
           </View>
-
-          {/* ---- local camera confidence monitor (phone source) ---- */}
-          {source === "phone" && permState.status === "granted" && !isEnded ? (
-            <View style={styles.monitorCard}>
-              <View style={styles.monitorLabel}>
-                <Eye size={11} color={Colors.textDim} />
-                <Text style={styles.monitorLabelText}>LOCAL PREVIEW ONLY · not broadcasting</Text>
-              </View>
-              <View style={styles.monitorWrap}>
-                <CameraView
-                  style={StyleSheet.absoluteFill}
-                  facing="front"
-                  mode="video"
-                  active={isLive || isConnecting}
-                  mirror
-                  videoQuality="1080p"
-                  onMountError={(e) => console.log("[povme] camera mount error", e.message)}
-                />
-              </View>
-            </View>
-          ) : null}
 
           {/* ---- live health panel ---- */}
           <View style={styles.healthSection}>
@@ -595,25 +589,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   rtmpNote: { color: Colors.textDim, fontSize: 10.5, fontWeight: "600", marginTop: 2 },
-
-  // monitor
-  monitorCard: {
-    borderRadius: Radius.lg,
-    overflow: "hidden",
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    marginBottom: 16,
-  },
-  monitorLabel: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    padding: 10,
-    backgroundColor: "rgba(0,0,0,0.4)",
-  },
-  monitorLabelText: { color: Colors.textDim, fontSize: 9.5, fontWeight: "800", letterSpacing: 0.5 },
-  monitorWrap: { height: 220, backgroundColor: Colors.ink },
 
   // health
   healthSection: { marginBottom: 16 },

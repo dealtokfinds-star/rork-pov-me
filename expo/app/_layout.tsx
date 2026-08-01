@@ -92,6 +92,7 @@ function RootLayoutNav() {
       <Stack.Screen name="notifications" options={{ title: "Notifications" }} />
       <Stack.Screen name="saved" options={{ title: "Saved POVs" }} />
       <Stack.Screen name="settings" options={{ title: "Settings" }} />
+      <Stack.Screen name="edit-profile" options={{ title: "Edit profile" }} />
       <Stack.Screen name="guidelines" options={{ title: "Content guidelines" }} />
       <Stack.Screen name="legal/terms" options={{ title: "Terms of Use" }} />
       <Stack.Screen name="legal/privacy" options={{ title: "Privacy Policy" }} />

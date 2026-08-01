@@ -63,6 +63,7 @@ function mapSearchToCreator(item: SearchItem): Creator {
     verified: item.verified,
     isLive: item.is_live,
     rating: 4.8,
+    socialLinks: {},
   };
 }
 
