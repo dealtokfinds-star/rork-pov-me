@@ -1,4 +1,7 @@
+import { jwtVerify, createRemoteJWKSet } from "https://deno.land/x/jose@v5.2.0/index.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const JWKS = createRemoteJWKSet(new URL("https://api.rork.com/.well-known/jwks.json"));
 
 export class AuthError extends Error {
   constructor(message: string) {
@@ -14,40 +17,24 @@ export interface AuthUser {
 }
 
 /**
- * Verify the Supabase Auth JWT from the Authorization header by asking
- * Supabase's GoTrue service to resolve the user. Returns the user's id
- * (UUID string), email, and display name on success.
+ * Verify the Rork Auth JWT from the Authorization header against Rork's JWKS.
+ * Returns the user's id (sub), email, and name on success.
  */
 export async function requireAuth(req: Request): Promise<AuthUser> {
   try {
     const token = req.headers.get("Authorization")?.replace("Bearer ", "");
     if (!token) throw new Error("Missing token");
 
-    const client = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      {
-        global: { headers: { Authorization: `Bearer ${token}` } },
-      },
-    );
-
-    const { data: { user }, error } = await client.auth.getUser();
-    if (error || !user) {
-      throw new Error(error?.message ?? "Authentication failed");
-    }
-
+    const { payload } = await jwtVerify(token, JWKS, {
+      issuer: "https://api.rork.com",
+    });
     return {
-      userId: user.id,
-      email: user.email ?? undefined,
-      name:
-        (user.user_metadata?.full_name as string | undefined) ??
-        (user.user_metadata?.name as string | undefined),
+      userId: payload.sub!,
+      email: payload.email as string | undefined,
+      name: payload.name as string | undefined,
     };
   } catch (err) {
-    if (err instanceof AuthError) throw err;
-    throw new AuthError(
-      err instanceof Error ? err.message : "Authentication failed",
-    );
+    throw new AuthError(err instanceof Error ? err.message : "Authentication failed");
   }
 }
 
@@ -68,8 +55,7 @@ export function createAdminClient() {
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 

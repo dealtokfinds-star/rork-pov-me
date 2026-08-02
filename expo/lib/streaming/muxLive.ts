@@ -8,8 +8,8 @@
  *   - stream-health      : host polls every 5s for real Mux metrics
  *   - end-live-stream    : host ends → Mux completes, replay VOD created
  *
- * All calls go through Supabase's `functions.invoke` so the Supabase Auth
- * JWT is attached automatically. No secrets live in the app.
+ * All calls go through Supabase's `functions.invoke` so the Rork Auth JWT
+ * is attached automatically from SecureStore. No secrets live in the app.
  */
 
 import { supabase } from "@/lib/supabase";

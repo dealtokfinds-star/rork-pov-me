@@ -1,14 +1,20 @@
+import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 
 import { supabase } from "@/lib/supabase";
-import { getValidAccessToken } from "@/lib/token";
 
-/** Returns the current user's id from the Supabase auth session. */
+/** Returns the current user's id from the stored Rork Auth JWT (sub claim). */
 async function currentUserId(): Promise<string | null> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  return session?.user?.id ?? null;
+  const token = await SecureStore.getItemAsync("access_token");
+  if (!token) return null;
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return payload.sub ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -46,7 +52,7 @@ interface ConnectResponse {
 }
 
 async function authHeader(): Promise<Record<string, string>> {
-  const token = await getValidAccessToken();
+  const token = await SecureStore.getItemAsync("access_token");
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

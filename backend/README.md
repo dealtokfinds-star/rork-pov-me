@@ -9,7 +9,7 @@ Supabase edge functions + database schema for the POVMe creator platform.
 - **Payments**: Lemon Squeezy (Merchant of Record) or Stripe (direct) — toggle via `PAYMENT_PROVIDER`
 - **Video**: Mux (direct uploads + live streaming with signed playback)
 - **Email**: Resend (transactional email for approval/rejection notices)
-- **Auth**: Supabase Auth (Google/Apple OAuth, JWT verified via GoTrue)
+- **Auth**: Rork Auth (OAuth JWT verified against Rork JWKS)
 
 ## Setup
 

@@ -1,7 +1,6 @@
+import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 import { Platform } from "react-native";
-
-import { getValidAccessToken } from "@/lib/token";
 
 /**
  * POVMe payments client.
@@ -44,7 +43,7 @@ export interface CheckoutOpenResult {
 }
 
 async function getAuthToken(): Promise<string | null> {
-  return getValidAccessToken();
+  return SecureStore.getItemAsync("access_token");
 }
 
 function buildReturnUrl(path: string): string {

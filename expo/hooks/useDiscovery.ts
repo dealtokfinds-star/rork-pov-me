@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as SecureStore from "expo-secure-store";
 
 import { supabase } from "@/lib/supabase";
-import { getValidAccessToken } from "@/lib/token";
 import type { Category, Creator, PovCategory } from "@/types";
 
 /**
@@ -16,7 +16,7 @@ import type { Category, Creator, PovCategory } from "@/types";
 const FN_BASE = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1`;
 
 async function authHeaders(): Promise<Record<string, string>> {
-  const token = await getValidAccessToken();
+  const token = await SecureStore.getItemAsync("access_token");
   const h: Record<string, string> = {
     "Content-Type": "application/json",
     apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
