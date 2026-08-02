@@ -1,4 +1,4 @@
-import { Apple, ArrowRight, Eye, TriangleAlert } from "lucide-react-native";
+import { Apple, Eye, TriangleAlert } from "lucide-react-native";
 import React, { useEffect, useRef } from "react";
 import {
   ActivityIndicator,
@@ -75,19 +75,6 @@ export default function SignInScreen() {
             </View>
           ) : null}
 
-          <PressableScale
-            onPress={() => void signIn("google")}
-            disabled={isSigningIn}
-            scaleTo={0.97}
-            hapticStyle="medium"
-          >
-            <View style={styles.googleButton}>
-              <GoogleGlyph />
-              <Text style={styles.googleLabel}>Continue with Google</Text>
-              <ArrowRight size={18} color={Colors.text} />
-            </View>
-          </PressableScale>
-
           {Platform.OS === "ios" ? (
             <PressableScale
               onPress={() => void signIn("apple")}
@@ -110,14 +97,6 @@ export default function SignInScreen() {
           </Text>
         </Animated.View>
       </View>
-    </View>
-  );
-}
-
-function GoogleGlyph(): React.ReactElement {
-  return (
-    <View style={styles.googleGlyph}>
-      <Text style={styles.googleGlyphText}>G</Text>
     </View>
   );
 }
@@ -181,36 +160,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   signingInText: { color: Colors.textMid, fontSize: 13, fontWeight: "600" },
-  googleButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    height: 56,
-    borderRadius: Radius.pill,
-    backgroundColor: Colors.surface,
-    borderWidth: 1.5,
-    borderColor: Colors.borderHi,
-    paddingHorizontal: 20,
-  },
-  googleGlyph: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  googleGlyphText: {
-    fontSize: 17,
-    fontWeight: "900",
-    color: "#4285F4",
-  },
-  googleLabel: {
-    flex: 1,
-    color: Colors.text,
-    fontSize: 16,
-    fontWeight: "800",
-  },
   appleButton: {
     flexDirection: "row",
     alignItems: "center",
