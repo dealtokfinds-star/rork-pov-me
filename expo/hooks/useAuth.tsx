@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
 import * as Linking from "expo-linking";
 import * as SecureStore from "expo-secure-store";
@@ -19,6 +20,7 @@ import { decodeJwt, getValidAccessToken } from "@/lib/token";
 const AUTH_URL = process.env.EXPO_PUBLIC_RORK_AUTH_URL!;
 const APP_KEY = process.env.EXPO_PUBLIC_RORK_APP_KEY!;
 const PROJECT_ID = process.env.EXPO_PUBLIC_PROJECT_ID!;
+const GUEST_KEY = "povme.guest.v1";
 
 /**
  * Generate a high-entropy PKCE code verifier (43-128 chars, unreserved set).
@@ -82,9 +84,12 @@ interface AuthContextType {
   user: AuthUser | null;
   isLoading: boolean;
   isSigningIn: boolean;
+  /** True when the user chose to browse without an account. Cleared on sign-in. */
+  isGuest: boolean;
   error: string | null;
   signIn: (provider: "google" | "apple") => Promise<void>;
   signOut: () => Promise<void>;
+  continueAsGuest: () => void;
   clearError: () => void;
 }
 
@@ -94,6 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSigningIn, setIsSigningIn] = useState<boolean>(false);
+  const [isGuest, setIsGuest] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const codeVerifierRef = useRef<string | null>(null);
 
@@ -108,6 +114,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(userFromToken(accessToken));
       } else {
         setUser(null);
+        // Restore a previously chosen guest session so app relaunches don't
+        // bounce guests back to the sign-in wall.
+        const guestFlag = await AsyncStorage.getItem(GUEST_KEY).catch(() => null);
+        if (guestFlag === "1") setIsGuest(true);
       }
     } catch (err) {
       console.error("[povme] Auth check failed:", err);
@@ -145,6 +155,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await SecureStore.setItemAsync("access_token", access_token);
       await SecureStore.setItemAsync("refresh_token", refresh_token);
 
+      setIsGuest(false);
+      AsyncStorage.removeItem(GUEST_KEY).catch(() => {});
       setUser(userData ?? userFromToken(access_token));
     },
     [],
@@ -275,12 +287,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async (): Promise<void> => {
     await SecureStore.deleteItemAsync("access_token");
     await SecureStore.deleteItemAsync("refresh_token");
+    setIsGuest(false);
+    AsyncStorage.removeItem(GUEST_KEY).catch(() => {});
     setUser(null);
+  }, []);
+
+  /** Enter guest mode: browse the feed without an account (persists across launches). */
+  const continueAsGuest = useCallback((): void => {
+    setIsGuest(true);
+    setError(null);
+    AsyncStorage.setItem(GUEST_KEY, "1").catch(() => {});
   }, []);
 
   return (
     <AuthContext.Provider
-      value={{ user, isLoading, isSigningIn, error, signIn, signOut, clearError }}
+      value={{ user, isLoading, isSigningIn, isGuest, error, signIn, signOut, continueAsGuest, clearError }}
     >
       {children}
     </AuthContext.Provider>

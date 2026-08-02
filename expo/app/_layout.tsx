@@ -74,7 +74,7 @@ function RootLayoutNav() {
     >
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="sign-in" options={{ headerShown: false, animation: "fade" }} />
-      <Stack.Screen name="onboarding" options={{ headerShown: false, animation: "fade" }} />
+      <Stack.Screen name="onboarding" options={{ headerShown: false, animation: "slide_from_right" }} />
       <Stack.Screen name="episode/[id]" options={{ headerShown: false, animation: "fade_from_bottom" }} />
       <Stack.Screen name="live/[id]" options={{ headerShown: false, animation: "fade" }} />
       <Stack.Screen name="creator/[id]" options={{ headerShown: false }} />
@@ -112,7 +112,7 @@ function RootLayoutNav() {
  * profile row synced to Supabase.
  */
 function AuthGate() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, isGuest } = useAuth();
   const router = useRouter();
   useProfileSync();
   // Register for push notifications once the user is signed in
@@ -132,10 +132,10 @@ function AuthGate() {
 
   useEffect(() => {
     if (isLoading) return;
-    if (!user) {
+    if (!user && !isGuest) {
       router.replace("/sign-in");
     }
-  }, [user, isLoading, router]);
+  }, [user, isLoading, isGuest, router]);
 
   if (isLoading) {
     return (

@@ -128,16 +128,38 @@ export default function OnboardingScreen() {
   const [followed, setFollowed] = useState<string[]>([]);
   const [finishing, setFinishing] = useState<boolean>(false);
   const fade = useRef(new Animated.Value(1)).current;
+  const slideX = useRef(new Animated.Value(0)).current;
+  const stepRef = useRef<number>(0);
 
   const photoUrl = account?.avatarUrl ?? user?.picture ?? null;
 
+  /**
+   * Direction-aware step transition: the outgoing step slides + fades out
+   * toward where you came from, the incoming step slides + springs in from
+   * the direction you're headed. Forward = right-to-left, back = left-to-right.
+   */
   const go = (next: number): void => {
     const clamped = Math.max(0, Math.min(READY_STEP, next));
-    Animated.sequence([
-      Animated.timing(fade, { toValue: 0, duration: 130, useNativeDriver: true }),
-      Animated.timing(fade, { toValue: 1, duration: 240, useNativeDriver: true }),
-    ]).start();
-    setStep(clamped);
+    if (clamped === stepRef.current) return;
+    const dir = clamped > stepRef.current ? 1 : -1;
+    stepRef.current = clamped;
+    Animated.parallel([
+      Animated.timing(fade, { toValue: 0, duration: 140, useNativeDriver: true }),
+      Animated.timing(slideX, { toValue: -44 * dir, duration: 140, useNativeDriver: true }),
+    ]).start(() => {
+      setStep(clamped);
+      slideX.setValue(44 * dir);
+      Animated.parallel([
+        Animated.timing(fade, { toValue: 1, duration: 240, useNativeDriver: true }),
+        Animated.spring(slideX, {
+          toValue: 0,
+          useNativeDriver: true,
+          damping: 24,
+          stiffness: 280,
+          mass: 0.8,
+        }),
+      ]).start();
+    });
   };
 
   const { data: creatorsData = [] } = useCreators();
@@ -286,7 +308,12 @@ export default function OnboardingScreen() {
           <Animated.View
             style={[
               styles.slideBody,
-              { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 26, opacity: fade },
+              {
+                paddingTop: insets.top + 24,
+                paddingBottom: insets.bottom + 26,
+                opacity: fade,
+                transform: [{ translateX: slideX }],
+              },
             ]}
           >
             <View style={styles.topRow}>
@@ -365,7 +392,9 @@ export default function OnboardingScreen() {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            <Animated.View style={{ flex: 1, opacity: fade }}>
+            <Animated.View
+              style={{ flex: 1, opacity: fade, transform: [{ translateX: slideX }] }}
+            >
               {/* Top bar: back + step counter + skip */}
               <View style={styles.formTopBar}>
                 <PressableScale onPress={() => go(Math.max(0, step - 1))} scaleTo={0.94}>

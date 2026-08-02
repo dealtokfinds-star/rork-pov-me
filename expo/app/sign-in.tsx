@@ -1,6 +1,7 @@
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { Apple, ArrowRight, ChevronRight, Eye, Shield, TriangleAlert } from "lucide-react-native";
+import { useRouter } from "expo-router";
+import { Apple, ArrowRight, ChevronRight, Eye, Shield, TriangleAlert, UserRound } from "lucide-react-native";
 import React, { useEffect, useRef } from "react";
 import {
   ActivityIndicator,
@@ -33,7 +34,20 @@ import { useAuth } from "@/hooks/useAuth";
  */
 export default function SignInScreen() {
   const insets = useSafeAreaInsets();
-  const { isSigningIn, error, signIn, clearError } = useAuth();
+  const router = useRouter();
+  const { user, isSigningIn, error, signIn, clearError, continueAsGuest } = useAuth();
+
+  // Once a real session lands (OAuth completes), move into the app.
+  useEffect(() => {
+    if (user) {
+      router.replace("/(tabs)");
+    }
+  }, [user, router]);
+
+  const handleGuest = (): void => {
+    continueAsGuest();
+    router.replace("/(tabs)/live");
+  };
 
   // Subtle entrance: the wordmark + CTAs rise in after the image lands.
   const fade = useRef(new Animated.Value(0)).current;
@@ -148,6 +162,23 @@ export default function SignInScreen() {
                 </View>
               </PressableScale>
             ) : null}
+
+            {/* Guest path — browse the live feed without an account. */}
+            <PressableScale
+              onPress={handleGuest}
+              disabled={isSigningIn}
+              scaleTo={0.97}
+              hapticStyle="light"
+            >
+              <View style={styles.guestButton}>
+                <UserRound size={16} color={Colors.textMid} />
+                <Text style={styles.guestLabel}>Continue as guest</Text>
+                <ChevronRight size={16} color={Colors.textDim} />
+              </View>
+            </PressableScale>
+            <Text style={styles.guestHint}>
+              Browse the live feed first — create an account whenever you&apos;re ready.
+            </Text>
 
             <Text style={styles.legal}>
               By continuing you confirm you&apos;re 18+ and accept POVMe&apos;s{" "}
@@ -313,6 +344,25 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.18)",
   },
   appleLabel: { flex: 1, color: "#fff", fontSize: 16, fontWeight: "800" },
+  guestButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    height: 50,
+    borderRadius: Radius.pill,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    paddingHorizontal: 20,
+  },
+  guestLabel: { flex: 1, color: Colors.textMid, fontSize: 14.5, fontWeight: "700" },
+  guestHint: {
+    color: Colors.textDim,
+    fontSize: 11,
+    fontWeight: "600",
+    textAlign: "center",
+    marginTop: -4,
+  },
   legal: {
     color: Colors.textDim,
     fontSize: 11.5,
