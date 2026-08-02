@@ -120,21 +120,7 @@ export default function SignInScreen() {
               </View>
             ) : null}
 
-            {/* Google — primary, full-width. */}
-            <PressableScale
-              onPress={() => void signIn("google")}
-              disabled={isSigningIn}
-              scaleTo={0.97}
-              hapticStyle="medium"
-            >
-              <View style={styles.googleButton}>
-                <GoogleGlyph />
-                <Text style={styles.googleLabel}>Continue with Google</Text>
-                <ArrowRight size={18} color={Colors.text} />
-              </View>
-            </PressableScale>
-
-            {/* Apple — iOS only, secondary. */}
+            {/* Apple — primary sign-in on iOS. */}
             {Platform.OS === "ios" ? (
               <PressableScale
                 onPress={() => void signIn("apple")}
@@ -145,9 +131,24 @@ export default function SignInScreen() {
                 <View style={styles.appleButton}>
                   <Apple size={20} color="#fff" />
                   <Text style={styles.appleLabel}>Continue with Apple</Text>
+                  <ArrowRight size={18} color="#fff" />
                 </View>
               </PressableScale>
-            ) : null}
+            ) : (
+              /* Google — fallback on Android/web where Apple isn't available. */
+              <PressableScale
+                onPress={() => void signIn("google")}
+                disabled={isSigningIn}
+                scaleTo={0.97}
+                hapticStyle="medium"
+              >
+                <View style={styles.googleButton}>
+                  <GoogleGlyph />
+                  <Text style={styles.googleLabel}>Continue with Google</Text>
+                  <ArrowRight size={18} color={Colors.text} />
+                </View>
+              </PressableScale>
+            )}
 
             <Text style={styles.legal}>
               By continuing you confirm you&apos;re 18+ and accept POVMe&apos;s{" "}
