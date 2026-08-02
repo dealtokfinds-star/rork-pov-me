@@ -1,57 +1,17 @@
-import * as Crypto from "expo-crypto";
 import * as Linking from "expo-linking";
-import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 import { Platform } from "react-native";
-import "react-native-get-random-values";
+import type { User } from "@supabase/supabase-js";
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
 
-import { decodeJwt, getValidAccessToken } from "@/lib/token";
-
-const AUTH_URL = process.env.EXPO_PUBLIC_RORK_AUTH_URL!;
-const APP_KEY = process.env.EXPO_PUBLIC_RORK_APP_KEY!;
-const PROJECT_ID = process.env.EXPO_PUBLIC_PROJECT_ID!;
-
-/**
- * Generate a high-entropy PKCE code verifier (43-128 chars, unreserved set).
- * Uses expo-crypto's native randomBytes — works in Hermes (where the Web
- * `crypto.subtle` / `crypto.getRandomValues` APIs are unavailable).
- */
-function generateCodeVerifier(): string {
-  const bytes = Crypto.getRandomBytes(32);
-  return base64UrlEncode(bytes);
-}
-
-/**
- * Compute the S256 PKCE code challenge = base64url(sha256(verifier)).
- * Uses expo-crypto's native digest, which is available on every platform
- * (Hermes does not implement `crypto.subtle.digest`).
- */
-async function generateCodeChallenge(verifier: string): Promise<string> {
-  const digest = await Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    verifier,
-    { encoding: Crypto.CryptoEncoding.BASE64 },
-  );
-  // digestStringAsync returns standard base64; convert to URL-safe + strip padding.
-  return digest.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
+import { supabase } from "@/lib/supabase";
 
 export interface AuthUser {
   id: string;
@@ -60,22 +20,18 @@ export interface AuthUser {
   picture?: string;
 }
 
-/** Decode the JWT payload to extract user info. Expiry is checked by the
- * shared token manager (`getValidAccessToken`), so callers never receive a
- * stale token. */
-function userFromToken(token: string): AuthUser | null {
-  try {
-    const payload = decodeJwt(token);
-    if (!payload?.sub) return null;
-    return {
-      id: payload.sub,
-      email: payload.email ?? "",
-      name: payload.name,
-      picture: payload.picture,
-    };
-  } catch {
-    return null;
-  }
+/** Map a Supabase auth user to the app's AuthUser shape. */
+function mapUser(supabaseUser: User): AuthUser {
+  return {
+    id: supabaseUser.id,
+    email: supabaseUser.email ?? "",
+    name:
+      (supabaseUser.user_metadata?.full_name as string | undefined) ??
+      (supabaseUser.user_metadata?.name as string | undefined),
+    picture:
+      (supabaseUser.user_metadata?.avatar_url as string | undefined) ??
+      (supabaseUser.user_metadata?.picture as string | undefined),
+  };
 }
 
 interface AuthContextType {
@@ -95,172 +51,108 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSigningIn, setIsSigningIn] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const codeVerifierRef = useRef<string | null>(null);
 
   const clearError = useCallback((): void => {
     setError(null);
   }, []);
 
-  const checkAuth = useCallback(async (): Promise<void> => {
-    try {
-      const accessToken = await getValidAccessToken();
-      if (accessToken) {
-        setUser(userFromToken(accessToken));
+  // ─── Initialise: restore session + subscribe to auth state changes ──────
+  useEffect(() => {
+    let mounted = true;
+
+    const init = async (): Promise<void> => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!mounted) return;
+      if (session?.user) {
+        setUser(mapUser(session.user));
+      }
+      setIsLoading(false);
+    };
+    void init();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      if (session?.user) {
+        setUser(mapUser(session.user));
       } else {
         setUser(null);
       }
-    } catch (err) {
-      console.error("[povme] Auth check failed:", err);
-    } finally {
-      setIsLoading(false);
-    }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
-  useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
-
-  const exchangeCode = useCallback(
-    async (code: string): Promise<void> => {
-      const verifier = codeVerifierRef.current;
-      if (!verifier) return;
-      codeVerifierRef.current = null;
-
-      const response = await fetch(`${AUTH_URL}/oauth/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ app_key: APP_KEY, code, code_verifier: verifier }),
-      });
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        const message = body.error || `Token exchange failed (${response.status})`;
-        console.error(`[povme] Token exchange failed (${response.status}):`, body);
-        setError(message);
-        return;
-      }
-
-      const { access_token, refresh_token, user: userData } = await response.json();
-
-      await SecureStore.setItemAsync("access_token", access_token);
-      await SecureStore.setItemAsync("refresh_token", refresh_token);
-
-      setUser(userData ?? userFromToken(access_token));
-    },
-    [],
-  );
-
-  const handleDeepLink = useCallback(
-    (event: { url: string }) => {
-      try {
-        const url = new URL(event.url);
-        if (url.pathname === "/auth/callback") {
-          const code = url.searchParams.get("code");
-          if (code) {
-            void exchangeCode(code);
-          }
-        }
-      } catch (err) {
-        console.error("[povme] Deep link handling failed:", err);
-        setError(err instanceof Error ? err.message : "Sign in failed");
-      }
-    },
-    [exchangeCode],
-  );
-
-  // Handle the initial URL if the app was cold-launched from an OAuth redirect.
-  // addEventListener("url") only fires for links that arrive *after* mount, so
-  // we also check getInitialURL() on startup to catch cold-launch callbacks.
-  useEffect(() => {
-    const subscription = Linking.addEventListener("url", handleDeepLink);
-    Linking.getInitialURL().then((url) => {
-      if (url) handleDeepLink({ url });
-    });
-    return () => subscription.remove();
-  }, [handleDeepLink]);
-
+  // ─── Sign in via Supabase OAuth (Google / Apple) ─────────────────────────
   const signIn = useCallback(
     async (provider: "google" | "apple"): Promise<void> => {
       setIsSigningIn(true);
       setError(null);
       try {
-        const verifier = generateCodeVerifier();
-        const challenge = await generateCodeChallenge(verifier);
-        codeVerifierRef.current = verifier;
-
         const isWeb = Platform.OS === "web";
-        const target = "rn";
-        const env = isWeb ? "preview" : "native";
 
-        const response = await fetch(`${AUTH_URL}/oauth/initiate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            app_key: APP_KEY,
+        // On web, let the SDK redirect the browser directly —
+        // detectSessionInUrl picks up the hash params on return.
+        if (isWeb) {
+          const redirectTo = `${window.location.origin}/sign-in`;
+          const { error: oauthError } = await supabase.auth.signInWithOAuth({
             provider,
-            code_challenge: challenge,
-            target,
-            env,
-          }),
-        });
-
-        if (!response.ok) {
-          codeVerifierRef.current = null;
-          const body = await response.json().catch(() => ({}));
-          const message = body.error || `Sign in failed (${response.status})`;
-          console.error(`[povme] Auth initiate failed (${response.status}):`, body);
-          setError(message);
-          return;
+            options: { redirectTo },
+          });
+          if (oauthError) throw oauthError;
+          return; // Browser navigates away — no more code runs here.
         }
 
-        const { auth_url } = await response.json();
+        // On native, open an in-app browser session and parse the callback.
+        const redirectUrl = Linking.createURL("auth/callback");
 
-        if (isWeb) {
-          const popup = window.open(auth_url, "_blank", "width=500,height=650");
-
-          await new Promise<void>((resolve, reject) => {
-            const onMessage = (event: MessageEvent) => {
-              if (event.data?.type !== "rork_auth_callback") return;
-              window.removeEventListener("message", onMessage);
-              clearInterval(pollTimer);
-              const code = event.data.code;
-              if (code) {
-                exchangeCode(code).then(resolve, reject);
-              } else {
-                reject(new Error("No code received"));
-              }
-            };
-            window.addEventListener("message", onMessage);
-
-            const pollTimer = setInterval(() => {
-              if (popup?.closed) {
-                clearInterval(pollTimer);
-                window.removeEventListener("message", onMessage);
-                codeVerifierRef.current = null;
-                resolve();
-              }
-            }, 500);
+        const { data, error: oauthError } =
+          await supabase.auth.signInWithOAuth({
+            provider,
+            options: {
+              redirectTo: redirectUrl,
+              skipBrowserRedirect: true,
+            },
           });
-        } else {
-          const redirectUrl = `rork-${PROJECT_ID}://auth/callback`;
-          const result = await WebBrowser.openAuthSessionAsync(auth_url, redirectUrl);
 
-          if (result.type === "success") {
-            const url = new URL(result.url);
-            const code = url.searchParams.get("code");
-            if (code) {
-              await exchangeCode(code);
-            } else {
-              console.error("[povme] Auth callback missing code param:", result.url);
-              setError("Sign-in callback was missing the authorization code.");
-            }
-          } else if (result.type === "cancel" || result.type === "dismiss") {
-            // User closed the browser — not an error, just cancelled.
-            codeVerifierRef.current = null;
-          } else {
-            console.error("[povme] Auth session unexpected result:", result);
-            setError("Sign-in was interrupted. Please try again.");
+        if (oauthError) throw oauthError;
+        if (!data.url) throw new Error("No OAuth URL returned");
+
+        const result = await WebBrowser.openAuthSessionAsync(
+          data.url,
+          redirectUrl,
+        );
+
+        if (result.type === "success") {
+          // Supabase appends tokens as hash params to the redirect URL.
+          const hashIndex = result.url.indexOf("#");
+          if (hashIndex < 0) {
+            throw new Error("Callback URL missing hash fragment");
           }
+          const params = new URLSearchParams(result.url.slice(hashIndex + 1));
+          const access_token = params.get("access_token");
+          const refresh_token = params.get("refresh_token");
+
+          if (!access_token || !refresh_token) {
+            throw new Error("Callback URL missing access or refresh token");
+          }
+
+          const { error: sessionError } = await supabase.auth.setSession({
+            access_token,
+            refresh_token,
+          });
+          if (sessionError) throw sessionError;
+          // onAuthStateChange will update `user`.
+        } else if (result.type === "cancel" || result.type === "dismiss") {
+          // User closed the browser — not an error.
+        } else {
+          setError("Sign-in was interrupted. Please try again.");
         }
       } catch (err) {
         console.error("[povme] Sign in failed:", err);
@@ -269,12 +161,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsSigningIn(false);
       }
     },
-    [exchangeCode],
+    [],
   );
 
   const signOut = useCallback(async (): Promise<void> => {
-    await SecureStore.deleteItemAsync("access_token");
-    await SecureStore.deleteItemAsync("refresh_token");
+    await supabase.auth.signOut();
     setUser(null);
   }, []);
 
