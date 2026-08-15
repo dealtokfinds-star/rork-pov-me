@@ -38,6 +38,7 @@ import {
   Tag,
   haptic,
 } from "@/components/ui";
+import { BRAND_IMAGES } from "@/constants/brand";
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import { CATEGORIES } from "@/constants/mock-data";
 import { useAuth } from "@/hooks/useAuth";
@@ -57,6 +58,8 @@ import {
 } from "@/lib/identity";
 import { useApp, type OnboardingIntent } from "@/providers/app-provider";
 import type { Creator, PovCategory } from "@/types";
+
+const AnimatedImage = Animated.createAnimatedComponent(Image);
 
 /**
  * POVMe onboarding — the "first episode" of the user's own POVMe life.
@@ -79,24 +82,21 @@ const SLIDES = [
     kicker: "Welcome to POVMe",
     title: "Stop watching highlight reels.\nStep inside the life.",
     body: "Every episode is filmed first-person — chest rigs, glasses, helmet cams. You don't watch their day. You wear it.",
-    image:
-      "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=1200&q=80",
+    image: BRAND_IMAGES.slideStepInside,
     icon: <Eye size={22} color={Colors.ink} />,
   },
   {
     kicker: "How POVMe works",
     title: "Subscribe to a life.\nUnlock the big days.",
     body: "A monthly sub gets you a creator's full POV feed. Premium adventures — ringside, cockpit, pitch day — unlock one at a time.",
-    image:
-      "https://images.unsplash.com/photo-1511919884226-fd3cad34687c?auto=format&fit=crop&w=1200&q=80",
+    image: BRAND_IMAGES.slideSubscribe,
     icon: <Sparkles size={22} color={Colors.ink} />,
   },
   {
     kicker: "Live POV",
     title: "Be there\nwhile it happens.",
     body: "Creators go live from a body cam. Chat, tip, send gifts, and stay for the paid replay — like you were on their shoulder.",
-    image:
-      "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=1200&q=80",
+    image: BRAND_IMAGES.slideLive,
     icon: <Radio size={22} color={Colors.ink} />,
   },
 ] as const;
@@ -132,6 +132,17 @@ export default function OnboardingScreen() {
   const fade = useRef(new Animated.Value(1)).current;
   const slideX = useRef(new Animated.Value(0)).current;
   const stepRef = useRef<number>(0);
+  const slideZoom = useRef(new Animated.Value(1.06)).current;
+
+  // Slow cinematic settle-in zoom on each slide's POV still.
+  useEffect(() => {
+    slideZoom.setValue(1.06);
+    Animated.timing(slideZoom, {
+      toValue: 1,
+      duration: 9000,
+      useNativeDriver: true,
+    }).start();
+  }, [step, slideZoom]);
 
   const photoUrl = account?.avatarUrl ?? user?.picture ?? null;
 
@@ -305,7 +316,13 @@ export default function OnboardingScreen() {
     <View style={styles.screen}>
       {slide ? (
         <>
-          <Image source={{ uri: slide.image }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          <View style={[StyleSheet.absoluteFill, { overflow: "hidden" }]}>
+            <AnimatedImage
+              source={{ uri: slide.image }}
+              style={[StyleSheet.absoluteFill, { transform: [{ scale: slideZoom }] }]}
+              contentFit="cover"
+            />
+          </View>
           <LinearGradient
             colors={["rgba(8,8,10,0.5)", "rgba(8,8,10,0.82)", Colors.ink]}
             locations={[0, 0.55, 0.95]}

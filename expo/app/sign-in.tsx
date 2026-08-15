@@ -1,7 +1,15 @@
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { Apple, ArrowRight, ChevronRight, Eye, Shield, TriangleAlert, UserRound } from "lucide-react-native";
+import {
+  Apple,
+  ArrowRight,
+  ChevronRight,
+  Eye,
+  Shield,
+  TriangleAlert,
+  UserRound,
+} from "lucide-react-native";
 import React, { useEffect, useRef } from "react";
 import {
   ActivityIndicator,
@@ -16,26 +24,37 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { PressableScale } from "@/components/ui";
+import { BRAND_IMAGES } from "@/constants/brand";
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import { useAuth } from "@/hooks/useAuth";
+import { useCreators, useStreams } from "@/lib/data";
+
+const AnimatedImage = Animated.createAnimatedComponent(Image);
 
 /**
  * POVMe sign-in — the launch screen.
  *
- * Design language: a cinematic, streaming-platform "press play" hero. Ink-black
- * base, a single atmospheric image bleeding to black, the wordmark as the hero,
- * and two social sign-in CTAs (Google + Apple). The 18+ gate is explicit and
- * part of the copy, not buried in fine print.
+ * Design language: a cinematic, streaming-platform "press play" hero. The
+ * brand's own first-person POV key art bleeds to ink-black behind a slow
+ * Ken Burns drift, the wordmark sits in a streaming-style top bar with a
+ * pulsing LIVE chip, and real social proof ("N creators live right now")
+ * feeds the guest funnel. One decision at a time: Google, Apple, or browse.
  *
- * Studied patterns: Apple TV+ launch (single hero, one decision), Twitch sign-in
- * (social-first, no email wall), Patreon (creator-led imagery), Spotify (bold
- * wordmark above the fold). POVMe adds the "step into someone else's life" POV
- * promise that no other streaming app can claim.
+ * Studied patterns: Apple TV+ launch (single hero, one decision), Twitch
+ * sign-in (social-first, live proof up front), Patreon (creator-led
+ * imagery), Spotify (bold wordmark above the fold). POVMe adds the "step
+ * into someone else's life" promise that no other streaming app can claim.
  */
 export default function SignInScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, isSigningIn, error, signIn, clearError, continueAsGuest } = useAuth();
+
+  // Real social proof: who's on air right now.
+  const { data: creators = [] } = useCreators();
+  const { data: streams = [] } = useStreams();
+  const liveCreators = creators.filter((c) => c.isLive && c.avatar).slice(0, 4);
+  const liveCount = streams.length;
 
   // Once a real session lands (OAuth completes), move into the app.
   useEffect(() => {
@@ -49,7 +68,7 @@ export default function SignInScreen() {
     router.replace("/(tabs)/live");
   };
 
-  // Subtle entrance: the wordmark + CTAs rise in after the image lands.
+  // Entrance: the wordmark + CTAs rise in after the image lands.
   const fade = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(fade, {
@@ -61,44 +80,86 @@ export default function SignInScreen() {
 
   const translateY = fade.interpolate({ inputRange: [0, 1], outputRange: [18, 0] });
 
+  // Ken Burns drift — the hero breathes without ever calling attention to itself.
+  const heroZoom = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(heroZoom, {
+          toValue: 1.09,
+          duration: 14000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(heroZoom, {
+          toValue: 1,
+          duration: 14000,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [heroZoom]);
+
+  // Pulsing dot for the LIVE chip + live-proof pill.
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 0.3, duration: 900, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+
   return (
     <View style={styles.screen}>
-      {/* Atmospheric hero image — a first-person POV suggestion. */}
-      <Image
-        source={{
-          uri: "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=1200&q=80",
-        }}
-        style={StyleSheet.absoluteFill}
-        contentFit="cover"
-        blurRadius={Platform.OS === "web" ? 0 : 8}
-      />
+      {/* Hero — the brand's own POV still, slowly breathing. */}
+      <View style={[StyleSheet.absoluteFill, { overflow: "hidden" }]}>
+        <AnimatedImage
+          source={{ uri: BRAND_IMAGES.signInHero }}
+          style={[StyleSheet.absoluteFill, { transform: [{ scale: heroZoom }] }]}
+          contentFit="cover"
+        />
+      </View>
       <LinearGradient
-        colors={["rgba(8,8,10,0.45)", "rgba(8,8,10,0.78)", Colors.ink]}
-        locations={[0, 0.55, 0.95]}
+        colors={["rgba(8,8,10,0.5)", "rgba(8,8,10,0.35)", "rgba(8,8,10,0.88)", Colors.ink]}
+        locations={[0, 0.3, 0.65, 1]}
         style={StyleSheet.absoluteFill}
       />
       {/* Acid-lime ambient glow at the top — the POVMe signature. */}
       <View style={styles.ambientGlow} pointerEvents="none" />
 
+      {/* Top bar: wordmark + live chip, like a streaming app header. */}
+      <Animated.View style={[styles.topBar, { paddingTop: insets.top + 14, opacity: fade }]}>
+        <View style={styles.brandRow}>
+          <View style={styles.iconBadge}>
+            <Eye size={17} color={Colors.ink} />
+          </View>
+          <Text style={styles.wordmark}>
+            POV<Text style={{ color: Colors.lime }}>ME</Text>
+          </Text>
+        </View>
+        <View style={styles.liveBadge}>
+          <Animated.View style={[styles.liveBadgeDot, { opacity: pulse }]} />
+          <Text style={styles.liveBadgeLabel}>LIVE</Text>
+        </View>
+      </Animated.View>
+
       <ScrollView
         contentContainerStyle={{
           flexGrow: 1,
-          paddingTop: insets.top + 48,
+          justifyContent: "flex-end",
+          paddingTop: insets.top + 110,
           paddingBottom: insets.bottom + 28,
           paddingHorizontal: 22,
         }}
         showsVerticalScrollIndicator={false}
       >
-        <Animated.View
-          style={{ flex: 1, justifyContent: "space-between", opacity: fade, transform: [{ translateY }] }}
-        >
+        <Animated.View style={{ opacity: fade, transform: [{ translateY }] }}>
           <View>
-            <View style={styles.iconBadge}>
-              <Eye size={24} color={Colors.ink} />
-            </View>
-            <Text style={styles.wordmark}>
-              POV<Text style={{ color: Colors.lime }}>ME</Text>
-            </Text>
             <Text style={styles.kicker}>Step inside someone else&apos;s life</Text>
             <Text style={styles.title}>
               Don&apos;t watch their day.{"\n"}Wear it.
@@ -116,7 +177,32 @@ export default function SignInScreen() {
             </View>
           </View>
 
-          <View style={{ gap: 14 }}>
+          <View style={{ gap: 14, marginTop: 30 }}>
+            {/* Live proof — real streams, real avatars, one tap in as guest. */}
+            {liveCount > 0 ? (
+              <PressableScale onPress={handleGuest} scaleTo={0.97} hapticStyle="light">
+                <View style={styles.livePill}>
+                  <View style={styles.liveStack}>
+                    {liveCreators.map((c, i) => (
+                      <Image
+                        key={c.id}
+                        source={{ uri: c.avatar }}
+                        style={[styles.liveAvatar, { marginLeft: i === 0 ? 0 : -9 }]}
+                        contentFit="cover"
+                      />
+                    ))}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.livePillTitle}>
+                      {liveCount} creator{liveCount === 1 ? "" : "s"} live right now
+                    </Text>
+                    <Text style={styles.livePillSub}>Watch free as a guest</Text>
+                  </View>
+                  <Animated.View style={[styles.liveDot, { opacity: pulse }]} />
+                </View>
+              </PressableScale>
+            ) : null}
+
             {error ? (
               <View style={styles.errorCard}>
                 <TriangleAlert size={16} color={Colors.danger} />
@@ -212,6 +298,56 @@ function GoogleGlyph(): React.ReactElement {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.ink },
+  topBar: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 22,
+    paddingBottom: 10,
+  },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  iconBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.lime,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: Colors.lime,
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  wordmark: {
+    color: Colors.text,
+    fontSize: 22,
+    fontWeight: "900",
+    letterSpacing: -1.2,
+  },
+  liveBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    height: 26,
+    borderRadius: Radius.pill,
+    backgroundColor: "rgba(255,45,111,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(255,45,111,0.45)",
+  },
+  liveBadgeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.magenta },
+  liveBadgeLabel: {
+    color: Colors.magenta,
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1.2,
+  },
   ambientGlow: {
     position: "absolute",
     top: -120,
@@ -223,35 +359,14 @@ const styles = StyleSheet.create({
     borderRadius: 200,
     pointerEvents: "none",
   },
-  iconBadge: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.lime,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 22,
-    shadowColor: Colors.lime,
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
-  },
-  wordmark: {
-    color: Colors.text,
-    fontSize: 42,
-    fontWeight: "900",
-    letterSpacing: -2,
-    marginBottom: 12,
-  },
-  kicker: { ...microLabel, color: Colors.lime, marginBottom: 18, fontSize: 11 },
+  kicker: { ...microLabel, color: Colors.lime, marginBottom: 14, fontSize: 11 },
   title: {
     color: Colors.text,
-    fontSize: 32,
+    fontSize: 34,
     fontWeight: "900",
     letterSpacing: -1.2,
-    lineHeight: 38,
-    marginBottom: 16,
+    lineHeight: 41,
+    marginBottom: 14,
   },
   body: {
     color: Colors.textMid,
@@ -277,6 +392,29 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.1)",
   },
   trustLabel: { color: Colors.textMid, fontSize: 11, fontWeight: "700" },
+  livePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: Radius.md,
+    backgroundColor: "rgba(19,19,24,0.72)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  liveStack: { flexDirection: "row", alignItems: "center" },
+  liveAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 2,
+    borderColor: Colors.ink,
+    backgroundColor: Colors.surfaceHi,
+  },
+  livePillTitle: { color: Colors.text, fontSize: 13.5, fontWeight: "800" },
+  livePillSub: { color: Colors.textDim, fontSize: 11.5, fontWeight: "600", marginTop: 1 },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.magenta },
   errorCard: {
     flexDirection: "row",
     alignItems: "center",
