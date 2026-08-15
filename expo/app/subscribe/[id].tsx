@@ -9,6 +9,7 @@ import { Avatar, Button, PressableScale, Tag, haptic } from "@/components/ui";
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import { formatCount, formatMoney } from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
+import { useTrackEvent } from "@/hooks/useTrackEvent";
 import { useCreator, useCreatorEpisodes } from "@/lib/data";
 
 interface Tier {
@@ -53,6 +54,7 @@ export default function SubscribeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { subscribeViaStripe, balance, isSubscribed } = useApp();
+  const track = useTrackEvent();
   const [tierId, setTierId] = useState<string>("basic");
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<boolean>(false);
@@ -87,6 +89,7 @@ export default function SubscribeScreen() {
       if (result.success) {
         setDone(true);
         haptic("success");
+        track("subscribe", { creator_id: creator.id, value: price });
       } else {
         setError(result.error ?? "Checkout was cancelled or failed.");
       }

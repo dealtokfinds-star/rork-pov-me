@@ -14,7 +14,7 @@ import {
   Share2,
   Sparkles,
 } from "lucide-react-native";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -29,6 +29,7 @@ import {
 } from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
 import { useAuth } from "@/hooks/useAuth";
+import { useTrackEvent } from "@/hooks/useTrackEvent";
 import { useCreator, useEpisode, useEpisodes } from "@/lib/data";
 import { useEpisodeAccess } from "@/hooks/useAccess";
 import { callEdge } from "@/lib/edge";
@@ -46,9 +47,19 @@ export default function EpisodeScreen() {
     toggleLiked,
   } = useApp();
 
+  const track = useTrackEvent();
+
   const { data: episode, isLoading } = useEpisode(id ?? "");
   const { data: creator } = useCreator(episode?.creatorId);
   const { data: allEpisodes = [] } = useEpisodes();
+
+  // Fire a view event once the episode resolves — powers recommendations
+  // and creator analytics funnels.
+  useEffect(() => {
+    if (episode) {
+      track("view", { episode_id: episode.id, creator_id: episode.creatorId });
+    }
+  }, [episode, track]);
 
   const [comment, setComment] = useState<string>("");
   const [commentState, setCommentState] = useState<"idle" | "sending" | "sent" | "error">("idle");
@@ -236,7 +247,12 @@ export default function EpisodeScreen() {
                 />
               }
               label={formatCount(episode.likes + (liked ? 1 : 0))}
-              onPress={() => toggleLiked(episode.id)}
+              onPress={() => {
+                toggleLiked(episode.id);
+                if (!liked) {
+                  track("like", { episode_id: episode.id, creator_id: episode.creatorId });
+                }
+              }}
             />
             <ActionPill
               icon={

@@ -24,6 +24,8 @@ import Colors, { Radius, microLabel } from "@/constants/colors";
 import { CATEGORIES, formatCount, formatMoney } from "@/constants/mock-data";
 import { useApp } from "@/providers/app-provider";
 import { createLiveStream, type CreatedLiveStream } from "@/lib/streaming/muxLive";
+import { callEdge } from "@/lib/edge";
+import { useTrackEvent } from "@/hooks/useTrackEvent";
 import type { PovCategory, StreamAccess } from "@/types";
 
 type Source = "chest" | "phone" | "desktop";
@@ -33,6 +35,7 @@ const PPV_PRICES = [3.99, 6.99, 9.99, 14.99];
 export default function GoLiveScreen() {
   const router = useRouter();
   const { creatorPrice, creatorStats, kycStatus } = useApp();
+  const track = useTrackEvent();
   const isVerified = kycStatus === "verified";
   const [title, setTitle] = useState<string>("");
   const [category, setCategory] = useState<PovCategory>("founder");
@@ -95,6 +98,9 @@ export default function GoLiveScreen() {
       });
 
       haptic("success");
+      // Record go-live + fan out push notifications to followers (fire-and-forget).
+      track("go_live", { stream_id: stream.streamId });
+      callEdge("notify-live", { stream_id: stream.streamId }).catch(() => {});
       // Route to the host screen with the real stream data.
       const qp = new URLSearchParams({
         title: title.trim().length > 0 ? title.trim() : "Untitled POV stream",
@@ -115,7 +121,7 @@ export default function GoLiveScreen() {
     } finally {
       setProvisioning(false);
     }
-  }, [title, category, access, ppvPrice, source, replay, slowMode, subOnlyChat, router]);
+  }, [title, category, access, ppvPrice, source, replay, slowMode, subOnlyChat, router, track]);
 
   // ---- KYC verification gate ----
   if (!isVerified) {

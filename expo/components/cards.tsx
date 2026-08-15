@@ -25,6 +25,7 @@ import { useCreator } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
 import type { Creator, Episode, LiveStream } from "@/types";
 import { Avatar, LiveBadge, PressableScale, Tag } from "@/components/ui";
+import { useTrackEvent } from "@/hooks/useTrackEvent";
 
 export function AccessTag({ episode }: { episode: Episode }) {
   if (episode.access === "free") {
@@ -48,6 +49,7 @@ export function EpisodeCard({ episode }: { episode: Episode }) {
   const { canWatch, toggleSaved, savedEpisodes, likedEpisodes, toggleLiked } = useApp();
   const { data: creator } = useCreator(episode.creatorId);
   const locked = !canWatch(episode);
+  const track = useTrackEvent();
   const cat = categoryById(episode.category);
   const saved = savedEpisodes.includes(episode.id);
   const liked = likedEpisodes.includes(episode.id);
@@ -56,7 +58,10 @@ export function EpisodeCard({ episode }: { episode: Episode }) {
     <View style={styles.card}>
       <PressableScale
         scaleTo={0.985}
-        onPress={() => router.push(`/episode/${episode.id}`)}
+        onPress={() => {
+          track("view", { episode_id: episode.id, creator_id: episode.creatorId });
+          router.push(`/episode/${episode.id}`);
+        }}
       >
         <View style={styles.thumbWrap}>
           <Image
@@ -132,7 +137,15 @@ export function EpisodeCard({ episode }: { episode: Episode }) {
         </PressableScale>
 
         <View style={styles.actionsRow}>
-          <PressableScale onPress={() => toggleLiked(episode.id)} scaleTo={0.85}>
+          <PressableScale
+            onPress={() => {
+              toggleLiked(episode.id);
+              if (!liked) {
+                track("like", { episode_id: episode.id, creator_id: episode.creatorId });
+              }
+            }}
+            scaleTo={0.85}
+          >
             <View style={styles.iconBtn}>
               <Heart
                 size={16}
@@ -184,10 +197,17 @@ export function EpisodeTile({ episode, width = 190 }: { episode: Episode; width?
   const router = useRouter();
   const { canWatch } = useApp();
   const locked = !canWatch(episode);
+  const track = useTrackEvent();
   const { data: creator } = useCreator(episode.creatorId);
 
   return (
-    <PressableScale scaleTo={0.96} onPress={() => router.push(`/episode/${episode.id}`)}>
+    <PressableScale
+      scaleTo={0.96}
+      onPress={() => {
+        track("view", { episode_id: episode.id, creator_id: episode.creatorId });
+        router.push(`/episode/${episode.id}`);
+      }}
+    >
       <View style={{ width }}>
         <View style={[styles.tileThumbWrap, { width }]}>
           <Image
@@ -232,6 +252,7 @@ export function EpisodeTile({ episode, width = 190 }: { episode: Episode; width?
 
 export function LiveStreamCard({ stream, wide }: { stream: LiveStream; wide?: boolean }) {
   const router = useRouter();
+  const track = useTrackEvent();
   const { data: creator } = useCreator(stream.creatorId);
   const cat = categoryById(stream.category);
   const accessLabel = useMemo(() => {
@@ -241,7 +262,13 @@ export function LiveStreamCard({ stream, wide }: { stream: LiveStream; wide?: bo
   }, [stream]);
 
   return (
-    <PressableScale scaleTo={0.97} onPress={() => router.push(`/live/${stream.id}`)}>
+    <PressableScale
+      scaleTo={0.97}
+      onPress={() => {
+        track("view", { stream_id: stream.id, creator_id: stream.creatorId });
+        router.push(`/live/${stream.id}`);
+      }}
+    >
       <View style={[styles.liveCard, wide && { width: "100%" }]}>
         <Image source={{ uri: stream.thumb }} style={styles.liveThumb} contentFit="cover" />
         <LinearGradient
@@ -278,11 +305,18 @@ export function LiveStreamCard({ stream, wide }: { stream: LiveStream; wide?: bo
 export function CreatorCard({ creator }: { creator: Creator }) {
   const router = useRouter();
   const { isSubscribed } = useApp();
+  const track = useTrackEvent();
   const subbed = isSubscribed(creator.id);
   const cat = categoryById(creator.categories[0]);
 
   return (
-    <PressableScale scaleTo={0.97} onPress={() => router.push(`/creator/${creator.id}`)}>
+    <PressableScale
+      scaleTo={0.97}
+      onPress={() => {
+        track("view", { creator_id: creator.id });
+        router.push(`/creator/${creator.id}`);
+      }}
+    >
       <View style={styles.creatorCard}>
         <Image source={{ uri: creator.cover }} style={styles.creatorCover} contentFit="cover" />
         <LinearGradient
@@ -320,8 +354,15 @@ export function CreatorCard({ creator }: { creator: Creator }) {
 
 export function CreatorRow({ creator, right }: { creator: Creator; right?: React.ReactNode }) {
   const router = useRouter();
+  const track = useTrackEvent();
   return (
-    <PressableScale scaleTo={0.98} onPress={() => router.push(`/creator/${creator.id}`)}>
+    <PressableScale
+      scaleTo={0.98}
+      onPress={() => {
+        track("view", { creator_id: creator.id });
+        router.push(`/creator/${creator.id}`);
+      }}
+    >
       <View style={styles.creatorRow}>
         <Avatar uri={creator.avatar} size={48} ring live={creator.isLive} />
         <View style={{ flex: 1, marginLeft: 12 }}>

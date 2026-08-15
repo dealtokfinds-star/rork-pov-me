@@ -8,6 +8,7 @@ import Colors, { Radius, microLabel } from "@/constants/colors";
 import { GIFTS, formatMoney } from "@/constants/mock-data";
 import { useCreator } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
+import { useTrackEvent } from "@/hooks/useTrackEvent";
 
 const PRESETS = [2, 5, 10, 20, 50, 100];
 
@@ -15,6 +16,7 @@ export default function TipScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { tipViaStripe, balance } = useApp();
+  const track = useTrackEvent();
   const [amount, setAmount] = useState<number>(5);
   const [custom, setCustom] = useState<string>("");
   const [note, setNote] = useState<string>("");
@@ -121,6 +123,7 @@ export default function TipScreen() {
                 const result = await tipViaStripe(creator.id, g.price, g.name);
                 if (result.success) {
                   haptic("success");
+                  track("tip", { creator_id: creator.id, value: g.price });
                   setSent(g.price);
                 } else {
                   setError(result.error ?? "Tip failed");
@@ -160,6 +163,7 @@ export default function TipScreen() {
             const result = await tipViaStripe(creator.id, resolved, note || undefined);
             if (result.success) {
               haptic("success");
+              track("tip", { creator_id: creator.id, value: resolved });
               setSent(resolved);
             } else {
               setError(result.error ?? "Tip failed");

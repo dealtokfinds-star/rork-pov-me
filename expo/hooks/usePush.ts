@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
+import { router } from "expo-router";
 
 import { callEdge } from "@/lib/edge";
 
@@ -36,7 +37,7 @@ export interface PushNotification {
   data: Record<string, unknown>;
 }
 
-export function usePushNotifications() {
+export function usePushNotifications(enabled = true) {
   const [token, setToken] = useState<string | null>(null);
   const [permissionStatus, setPermissionStatus] = useState<Notifications.PermissionStatus | null>(null);
   const [lastNotification, setLastNotification] = useState<PushNotification | null>(null);
@@ -91,7 +92,7 @@ export function usePushNotifications() {
   }, []);
 
   useEffect(() => {
-    register();
+    if (enabled) register();
 
     // Listen for incoming notifications while app is open
     const sub = Notifications.addNotificationReceivedListener((notification) => {
@@ -107,16 +108,20 @@ export function usePushNotifications() {
     // Listen for notification taps (to route the user)
     const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data as Record<string, unknown>;
-      // The root layout / router can observe lastNotification or this event
-      // to navigate. For now, surface the data.
-      console.log("[povme] notification tapped", data);
+      const streamId = typeof data.stream_id === "string" ? data.stream_id : null;
+      const episodeId = typeof data.episode_id === "string" ? data.episode_id : null;
+      const creatorId = typeof data.creator_id === "string" ? data.creator_id : null;
+      if (streamId) router.push(`/live/${streamId}`);
+      else if (episodeId) router.push(`/episode/${episodeId}`);
+      else if (creatorId) router.push(`/creator/${creatorId}`);
+      else router.push("/notifications");
     });
 
     return () => {
       sub.remove();
       responseSub.remove();
     };
-  }, [register]);
+  }, [register, enabled]);
 
   return {
     token,

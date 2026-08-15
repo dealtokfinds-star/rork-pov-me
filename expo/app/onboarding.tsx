@@ -41,6 +41,7 @@ import {
 import Colors, { Radius, microLabel } from "@/constants/colors";
 import { CATEGORIES } from "@/constants/mock-data";
 import { useAuth } from "@/hooks/useAuth";
+import { useTrackEvent } from "@/hooks/useTrackEvent";
 import { useProfile, type AccountUpdateInput } from "@/hooks/useProfile";
 import { useCreators } from "@/lib/data";
 import {
@@ -127,6 +128,7 @@ export default function OnboardingScreen() {
   const [picked, setPicked] = useState<PovCategory[]>([]);
   const [followed, setFollowed] = useState<string[]>([]);
   const [finishing, setFinishing] = useState<boolean>(false);
+  const track = useTrackEvent();
   const fade = useRef(new Animated.Value(1)).current;
   const slideX = useRef(new Animated.Value(0)).current;
   const stepRef = useRef<number>(0);
@@ -284,6 +286,10 @@ export default function OnboardingScreen() {
       // Always complete local onboarding so the UI proceeds even if the
       // backend write fails (RLS/network) — the row will retry on next sync.
       completeOnboarding(trimmed, picked, followed, finalHandle || undefined);
+      // Record real follow events so Following feeds + live-start pushes work.
+      followed.forEach((creatorId) => {
+        track("follow", { creator_id: creatorId });
+      });
       setFinishing(false);
       router.replace("/(tabs)");
       if (intent === "creator") {

@@ -41,6 +41,7 @@ import { useApp } from "@/providers/app-provider";
 import { useCreator, useStream } from "@/lib/data";
 import { useStreamAccess } from "@/hooks/useAccess";
 import { useStreamChat } from "@/hooks/useChat";
+import { useTrackEvent } from "@/hooks/useTrackEvent";
 import type { ChatMessage } from "@/types";
 
 const QUICK_TIPS = [2, 5, 10, 25];
@@ -56,6 +57,8 @@ export default function LiveRoomScreen() {
     tipViaStripe,
     balance,
   } = useApp();
+
+  const track = useTrackEvent();
 
   const { data: stream, isLoading } = useStream(id ?? "");
   const { data: creator } = useCreator(stream?.creatorId);
@@ -91,6 +94,13 @@ export default function LiveRoomScreen() {
   useEffect(() => {
     setViewers(stream?.viewers ?? realViewerCount ?? 0);
   }, [stream?.viewers, realViewerCount]);
+
+  // View event once the stream resolves — powers recommendations + funnels.
+  useEffect(() => {
+    if (stream && creator) {
+      track("view", { stream_id: stream.id, creator_id: stream.creatorId });
+    }
+  }, [stream, creator, track]);
 
   const player = useVideoPlayer(access && hlsUrl ? hlsUrl : null, (p) => {
     p.loop = true;
@@ -146,9 +156,10 @@ export default function LiveRoomScreen() {
       }
       haptic("success");
       setGiftOpen(false);
+      track("tip", { creator_id: stream.creatorId, value: amount });
       showBanner(`${label ?? "Tip"} sent · ${formatMoney(amount)}`);
     },
-    [stream, tipViaStripe, showBanner],
+    [stream, tipViaStripe, showBanner, track],
   );
 
   if (isLoading || accessLoading) {
@@ -219,6 +230,11 @@ export default function LiveRoomScreen() {
                 return;
               }
               haptic("success");
+              if (isPpv) {
+                track("unlock", { stream_id: stream.id, creator_id: stream.creatorId, value: price });
+              } else {
+                track("subscribe", { creator_id: stream.creatorId, value: price });
+              }
               showBanner("Payment processing — access will be granted shortly.");
             }}
             style={{ marginTop: 22 }}

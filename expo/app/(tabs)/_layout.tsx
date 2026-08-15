@@ -5,12 +5,19 @@ import React from "react";
 import { Platform, StyleSheet, View } from "react-native";
 
 import Colors from "@/constants/colors";
+import { useAuth } from "@/hooks/useAuth";
 import { useLiveNow } from "@/hooks/useLiveNow";
+import { usePushNotifications } from "@/hooks/usePush";
 
 export default function TabLayout() {
   // Realtime: keeps LIVE badges on creator cards/avatars in sync with the
   // live_streams table without manual refreshes.
   useLiveNow();
+
+  // Push registration + tap routing. Gated on a real session so guest
+  // browsers never see a permission prompt.
+  const { user } = useAuth();
+  usePushNotifications(!!user);
   return (
     <Tabs
       screenOptions={{

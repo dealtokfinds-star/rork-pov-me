@@ -14,11 +14,13 @@ import {
 } from "@/constants/mock-data";
 import { useEpisode, useCreator } from "@/lib/data";
 import { useApp } from "@/providers/app-provider";
+import { useTrackEvent } from "@/hooks/useTrackEvent";
 
 export default function UnlockScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { unlockViaStripe, balance } = useApp();
+  const track = useTrackEvent();
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<boolean>(false);
   const [done, setDone] = useState<boolean>(false);
@@ -124,6 +126,7 @@ export default function UnlockScreen() {
               const result = await unlockViaStripe(episode.id, price, creator.id);
               if (result.success) {
                 haptic("success");
+                track("unlock", { episode_id: episode.id, creator_id: creator.id, value: price });
                 setDone(true);
               } else {
                 setError(result.error ?? "Checkout was cancelled or failed.");
